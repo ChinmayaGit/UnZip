@@ -1,10 +1,12 @@
 import Foundation
 
 enum ArchiveEngine {
-    static func open(url: URL) throws -> (format: ArchiveFormat, entries: [ArchiveEntry]) {
-        let format = FormatDetector.detect(url: url)
-        let entries = try list(url: url, format: format)
-        return (format, entries)
+    static func open(url: URL) throws -> (format: ArchiveFormat, entries: [ArchiveEntry], resolvedURL: URL, parts: Int) {
+        let parts = SplitVolume.partCount(around: url)
+        let resolved = (try? SplitVolume.resolve(url)) ?? url
+        let format = FormatDetector.detect(url: resolved)
+        let entries = try list(url: resolved, format: format)
+        return (format, entries, resolved, parts)
     }
 
     static func list(url: URL, format: ArchiveFormat) throws -> [ArchiveEntry] {

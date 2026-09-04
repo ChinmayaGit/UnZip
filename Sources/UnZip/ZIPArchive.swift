@@ -2,6 +2,7 @@ import Foundation
 
 enum ZIPArchive {
     static func list(url: URL) throws -> [ArchiveEntry] {
+        let url = try SplitVolume.resolve(url)
         if let parsed = try? parseCentralDirectory(url: url), !parsed.isEmpty {
             return parsed
         }
@@ -9,6 +10,7 @@ enum ZIPArchive {
     }
 
     static func extract(url: URL, destination: URL, entries: [ArchiveEntry]?, password: String?) throws {
+        let url = try SplitVolume.resolve(url)
         var args = ["-o"]
         if let password, !password.isEmpty {
             args.append(contentsOf: ["-P", password])
@@ -31,6 +33,7 @@ enum ZIPArchive {
     }
 
     static func extractData(url: URL, path: String, password: String?) throws -> Data {
+        let url = try SplitVolume.resolve(url)
         var args = ["-p"]
         if let password, !password.isEmpty {
             args.append(contentsOf: ["-P", password])

@@ -1,6 +1,17 @@
 import Foundation
 
 enum FormatDetector {
+    static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    static func isUnzippable(_ url: URL) -> Bool {
+        if isDirectory(url) { return false }
+        let format = detect(url: url)
+        if format != .unknown { return true }
+        return ArchiveFormat.from(url: url) != .unknown
+    }
+
     static func detect(url: URL) -> ArchiveFormat {
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             return ArchiveFormat.from(url: url)

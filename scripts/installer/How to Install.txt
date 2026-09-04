@@ -1,0 +1,23 @@
+UnZip for macOS
+===============
+
+Requires macOS 14 or later. Works on Apple Silicon and Intel.
+
+Install from the disk image
+---------------------------
+1. Drag UnZip into the Applications folder.
+2. Open UnZip from Applications (or Spotlight).
+3. If macOS says the app cannot be opened, Control-click UnZip
+   and choose Open, then click Open again.
+
+Install from the package
+------------------------
+Double-click UnZip-1.0.pkg and follow the steps.
+The app is installed in /Applications.
+
+After install
+-------------
+Right-click a folder or file in Finder → Services → Zip with UnZip.
+
+Optional (RAR / 7Z extract):
+  brew install unar p7zip

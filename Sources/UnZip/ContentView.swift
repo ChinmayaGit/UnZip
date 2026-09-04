@@ -7,23 +7,26 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
-        } content: {
-            Group {
-                if let document = state.selectedDocument {
-                    ArchiveBrowserView(document: document)
-                } else if let session = state.selectedFTP {
-                    FTPBrowserView(session: session)
-                } else {
-                    WelcomeView()
+        Group {
+            if state.showPreviewPane {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    SidebarView()
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
+                } content: {
+                    browserColumn
+                        .navigationSplitViewColumnWidth(min: 420, ideal: 620)
+                } detail: {
+                    PreviewPane()
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 480)
+                }
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    SidebarView()
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
+                } detail: {
+                    browserColumn
                 }
             }
-            .navigationSplitViewColumnWidth(min: 420, ideal: 620)
-        } detail: {
-            PreviewPane()
-                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 480)
         }
         .toolbar { toolbar }
         .navigationTitle(title)
@@ -43,8 +46,14 @@ struct ContentView: View {
         .sheet(isPresented: $state.showCreateSheet) {
             CreateArchiveSheet()
         }
+        .sheet(item: $state.compressJob) { job in
+            CompressSheet(job: job)
+        }
         .sheet(item: $state.passwordPrompt) { prompt in
             PasswordSheet(url: prompt.url)
+        }
+        .sheet(item: $state.dropOffer) { offer in
+            DropOfferSheet(offer: offer)
         }
     }
 
@@ -54,9 +63,89 @@ struct ContentView: View {
         return "UnZip"
     }
 
+    @ViewBuilder
+    private var browserColumn: some View {
+        if let document = state.selectedDocument {
+            ArchiveBrowserView(document: document)
+        } else if let session = state.selectedFTP {
+            FTPBrowserView(session: session)
+        } else {
+            WelcomeView()
+        }
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button {
+                state.goBack()
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .disabled(!(state.selectedDocument?.canGoBack ?? false))
+            .help("Back")
+
+            Button {
+                state.goForward()
+            } label: {
+                Label("Forward", systemImage: "chevron.right")
+            }
+            .disabled(!(state.selectedDocument?.canGoForward ?? false))
+            .help("Forward")
+
+            Button {
+                state.goUp()
+            } label: {
+                Label("Enclosing Folder", systemImage: "chevron.up")
+            }
+            .disabled(!(state.selectedDocument?.canGoUp ?? false))
+            .help("Enclosing folder")
+        }
+
         ToolbarItemGroup(placement: .primaryAction) {
+            Picker("View", selection: Binding(
+                get: { state.browserLayout },
+                set: { state.setLayout($0) }
+            )) {
+                ForEach(BrowserLayout.allCases) { layout in
+                    Label(layout.title, systemImage: layout.systemImage).tag(layout)
+                }
+            }
+            .pickerStyle(.segmented)
+            .help("Details or grid view")
+
+            Button {
+                state.togglePreviewPane()
+            } label: {
+                Label(
+                    state.showPreviewPane ? "Hide Preview" : "Show Preview",
+                    systemImage: state.showPreviewPane ? "sidebar.right" : "rectangle"
+                )
+            }
+            .help(state.showPreviewPane ? "Hide the preview pane" : "Show the preview pane")
+
+            Menu {
+                ForEach(EntrySort.allCases) { sort in
+                    Button {
+                        state.setSort(sort)
+                    } label: {
+                        HStack {
+                            Text(sort.title)
+                            if state.entrySort == sort {
+                                Image(systemName: state.sortAscending ? "chevron.up" : "chevron.down")
+                            }
+                        }
+                    }
+                }
+                Divider()
+                Button(state.sortAscending ? "Descending" : "Ascending") {
+                    state.toggleSortDirection()
+                }
+            } label: {
+                Label("Sort", systemImage: "arrow.up.arrow.down")
+            }
+            .help("Sort by name, date, type, or size")
+
             Button {
                 state.openPanel()
             } label: {
@@ -104,6 +193,8 @@ struct ContentView: View {
                 ProgressView(value: progress)
                     .frame(width: 120)
             }
+            Text("Drag files to Desktop or any folder to extract")
+                .foregroundStyle(.tertiary)
             Text(state.capabilities)
                 .foregroundStyle(.tertiary)
         }
@@ -115,7 +206,7 @@ struct ContentView: View {
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         DroppedFiles.urls(from: providers) { urls in
-            for url in urls { state.open(url: url) }
+            state.receiveDropped(urls)
         }
         return !providers.isEmpty
     }
@@ -156,6 +247,14 @@ struct SidebarView: View {
                             Image(systemName: document.format.systemImage)
                         }
                         .tag(document.id.uuidString)
+                        .onDrag {
+                            if let payload = document.dragPayloadForCurrentFolder() {
+                                return DragSession.provider(for: payload)
+                            }
+                            return NSItemProvider()
+                        } preview: {
+                            DragPreview(name: document.title, icon: document.format.systemImage)
+                        }
                         .contextMenu {
                             Button("Extract…") {
                                 state.selectedDocumentID = document.id
@@ -249,7 +348,11 @@ struct WelcomeView: View {
             VStack(spacing: 8) {
                 Text("UnZip")
                     .font(.system(size: 28, weight: .semibold, design: .rounded))
-                Text("Read ZIP, RAR, ISO, TAR, 7Z, DMG and more.\nExtract locally or pull archives over FTP.")
+                Text("Drop an archive to open it, or drop a folder or file to zip it.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 420)
+                Text("ZIP, RAR, ISO, TAR, 7Z, DMG — and any folder or file you want to compress.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 420)
@@ -274,6 +377,9 @@ struct WelcomeView: View {
             }
             .padding(.top, 8)
 
+            Text("In Finder, right-click a folder or file → Services → Zip with UnZip")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             if !Toolchain.rarReady {
                 Text("For RAR and 7Z extraction, install extra tools: brew install unar p7zip")
                     .font(.caption)
@@ -297,16 +403,16 @@ struct WelcomeView: View {
             .frame(width: 420, height: 110)
             .overlay {
                 VStack(spacing: 6) {
-                    Text("Drop archives here")
+                    Text(hovering ? "Release to open or zip" : "Drop archives or folders")
                         .font(.headline)
-                    Text("ZIP, RAR, ISO, TAR, DMG, 7Z")
+                    Text("Archives open · folders and files can be zipped")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             .onDrop(of: [.fileURL], isTargeted: $hovering) { providers in
                 DroppedFiles.urls(from: providers) { urls in
-                    for url in urls { state.open(url: url) }
+                    state.receiveDropped(urls)
                 }
                 return true
             }
@@ -328,66 +434,183 @@ struct ArchiveBrowserView: View {
     @EnvironmentObject private var state: AppState
     @ObservedObject var document: OpenDocument
 
+    private var entries: [ArchiveEntry] {
+        document.visibleEntries(sort: state.entrySort, ascending: state.sortAscending)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             pathBar
-            Table(document.visibleEntries, selection: $document.selectedIDs) {
-                TableColumn("Name") { entry in
-                    Label(entry.name.isEmpty ? entry.path : entry.name, systemImage: entry.isDirectory ? "folder" : icon(for: entry.name))
-                        .lineLimit(1)
-                }
-                TableColumn("Size") { entry in
-                    Text(entry.sizeLabel)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                .width(min: 70, ideal: 90)
-                TableColumn("Kind") { entry in
-                    Text(entry.isDirectory ? "Folder" : (entry.encrypted ? "Encrypted" : kind(entry.name)))
-                        .foregroundStyle(.secondary)
-                }
-                .width(min: 80, ideal: 110)
-            }
-            .contextMenu(forSelectionType: String.self) { ids in
-                if !ids.isEmpty {
-                    Button("Extract Selected…") { state.extractSelected() }
-                    if ids.count == 1, let entry = document.entries.first(where: { $0.id == ids.first }) {
-                        Button("Preview") { state.previewEntry(entry) }
-                    }
+            Group {
+                if entries.isEmpty {
+                    emptyFolder
+                } else if state.browserLayout == .details {
+                    detailsView
+                } else {
+                    gridView
                 }
             }
-            .onTapGesture(count: 2) {
-                if let entry = document.selectedEntries.first {
-                    state.previewEntry(entry)
-                }
+            .searchable(text: $document.filter, prompt: "Search inside archive")
+            .onKeyPress(.return) {
+                state.openSelected()
+                return .handled
             }
-            .searchable(text: $document.filter, prompt: "Filter files")
         }
+    }
+
+    private var detailsView: some View {
+        Table(entries, selection: $document.selectedIDs) {
+            TableColumn(columnTitle("Name", .name)) { entry in
+                Label(entry.name.isEmpty ? entry.path : entry.name, systemImage: FileAppearance.icon(for: entry))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .extractDrag(entry, document: document)
+            }
+            TableColumn(columnTitle("Date", .date)) { entry in
+                Text(entry.dateLabel)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .extractDrag(entry, document: document)
+            }
+            .width(min: 140, ideal: 170)
+            TableColumn(columnTitle("Size", .size)) { entry in
+                Text(entry.sizeLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .extractDrag(entry, document: document)
+            }
+            .width(min: 70, ideal: 90)
+            TableColumn(columnTitle("Kind", .type)) { entry in
+                Text(entry.kindLabel)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .extractDrag(entry, document: document)
+            }
+            .width(min: 80, ideal: 110)
+        }
+        .contextMenu(forSelectionType: String.self) { ids in
+            contextMenu(ids)
+        } primaryAction: { ids in
+            if let id = ids.first, let entry = document.entries.first(where: { $0.id == id }) {
+                state.openEntry(entry)
+            }
+        }
+    }
+
+    private var gridView: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 108, maximum: 140), spacing: 12)], spacing: 16) {
+                ForEach(entries) { entry in
+                    gridItem(entry)
+                }
+            }
+            .padding(16)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .contextMenu(forSelectionType: String.self) { ids in
+            contextMenu(ids)
+        }
+    }
+
+    private func gridItem(_ entry: ArchiveEntry) -> some View {
+        let selected = document.selectedIDs.contains(entry.id)
+        return VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor))
+                    .frame(width: 72, height: 72)
+                Image(systemName: FileAppearance.icon(for: entry))
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.primary)
+            }
+            Text(entry.name.isEmpty ? entry.path : entry.name)
+                .font(.caption)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 96, height: 32)
+                .padding(.horizontal, 4)
+                .background(selected ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+        }
+        .frame(width: 108)
+        .contentShape(Rectangle())
+        .extractDrag(entry, document: document)
+        .onTapGesture(count: 2) {
+            document.selectedIDs = [entry.id]
+            state.openEntry(entry)
+        }
+        .onTapGesture {
+            select(entry)
+        }
+        .contextMenu {
+            contextButtons(for: entry)
+        }
+    }
+
+    private var emptyFolder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: document.filter.isEmpty ? "folder" : "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.tertiary)
+            Text(document.filter.isEmpty ? "This folder is empty" : "No matching files")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
     private var pathBar: some View {
         HStack(spacing: 6) {
             Button {
-                document.currentPath = ""
-                document.selectedIDs = []
+                document.navigate(to: "")
             } label: {
-                Image(systemName: "internaldrive")
+                Label(document.title, systemImage: document.format.systemImage)
+                    .labelStyle(.titleAndIcon)
             }
-            .buttonStyle(.borderless)
-            .help("Archive root")
+            .buttonStyle(.plain)
+            .help("Archive root — drag to extract")
+            .onDrag {
+                if let payload = document.dragPayloadForCurrentFolder() {
+                    return DragSession.provider(for: payload)
+                }
+                return NSItemProvider()
+            } preview: {
+                DragPreview(name: document.currentPath.isEmpty ? document.title : document.breadcrumb.last ?? document.title, icon: document.format.systemImage)
+            }
 
             ForEach(Array(document.breadcrumb.enumerated()), id: \.offset) { index, part in
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 Button(part) {
-                    document.currentPath = document.breadcrumb.prefix(index + 1).joined(separator: "/")
-                    document.selectedIDs = []
+                    document.goToBreadcrumb(index: index)
                 }
                 .buttonStyle(.plain)
             }
             Spacer()
-            Text("\(document.visibleEntries.count)")
+            if !document.filter.isEmpty {
+                Text("Search results")
+                    .foregroundStyle(.secondary)
+            }
+            Picker("Sort", selection: Binding(
+                get: { state.entrySort },
+                set: { state.setSort($0) }
+            )) {
+                ForEach(EntrySort.allCases) { sort in
+                    Text(sort.title).tag(sort)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 92)
+            Button {
+                state.toggleSortDirection()
+            } label: {
+                Image(systemName: state.sortAscending ? "arrow.up" : "arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .help(state.sortAscending ? "Ascending" : "Descending")
+            Text("\(entries.count)")
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
         }
@@ -396,27 +619,102 @@ struct ArchiveBrowserView: View {
         .background(.bar)
     }
 
-    private func icon(for name: String) -> String {
-        switch URL(fileURLWithPath: name).pathExtension.lowercased() {
-        case "png", "jpg", "jpeg", "gif", "webp", "heic": return "photo"
-        case "pdf": return "doc.richtext"
-        case "txt", "md", "log": return "doc.plaintext"
-        case "zip", "rar", "7z": return "doc.zipper"
-        case "mp3", "wav", "aiff": return "waveform"
-        case "mp4", "mov": return "film"
-        default: return "doc"
+    private func columnTitle(_ title: String, _ sort: EntrySort) -> String {
+        guard state.entrySort == sort else { return title }
+        return title + (state.sortAscending ? " ↑" : " ↓")
+    }
+
+    private func select(_ entry: ArchiveEntry) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if document.selectedIDs.contains(entry.id) {
+                document.selectedIDs.remove(entry.id)
+            } else {
+                document.selectedIDs.insert(entry.id)
+            }
+        } else {
+            document.selectedIDs = [entry.id]
         }
     }
 
-    private func kind(_ name: String) -> String {
-        let ext = URL(fileURLWithPath: name).pathExtension.uppercased()
-        return ext.isEmpty ? "File" : ext
+    @ViewBuilder
+    private func contextMenu(_ ids: Set<String>) -> some View {
+        if !ids.isEmpty {
+            if ids.count == 1, let entry = document.entries.first(where: { $0.id == ids.first }) {
+                contextButtons(for: entry)
+            } else {
+                let selected = document.entries.filter { ids.contains($0.id) }
+                Button("Extract Selected…") { state.extractSelected() }
+                Menu("Compress Selected") {
+                    Button("ZIP…") { state.requestCompress(entries: selected, format: .zip) }
+                    Button("RAR…") { state.requestCompress(entries: selected, format: .rar) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func contextButtons(for entry: ArchiveEntry) -> some View {
+        if entry.isDirectory {
+            Button("Open Folder") { state.openEntry(entry) }
+        } else if entry.isNestedArchive {
+            Button("Open Archive") { state.openEntry(entry) }
+            Button("Preview") { state.previewEntry(entry) }
+        } else {
+            Button("Open") { state.openEntry(entry) }
+        }
+        Button("Extract…") { state.extractSelected() }
+        if entry.isDirectory {
+            Divider()
+            Menu("Compress Folder") {
+                Button("ZIP…") { state.requestCompress(entries: [entry], format: .zip) }
+                Button("RAR…") { state.requestCompress(entries: [entry], format: .rar) }
+            }
+        } else {
+            Menu("Compress") {
+                Button("ZIP…") { state.requestCompress(entries: [entry], format: .zip) }
+                Button("RAR…") { state.requestCompress(entries: [entry], format: .rar) }
+            }
+        }
+        Text("Or drag to Desktop, Finder, or another app")
+    }
+}
+
+private extension View {
+    func extractDrag(_ entry: ArchiveEntry, document: OpenDocument) -> some View {
+        let extra = document.selectedEntries.contains(where: { $0.id == entry.id }) ? max(0, document.selectedIDs.count - 1) : 0
+        return self.onDrag {
+            if let payload = document.dragPayload(for: entry) {
+                return DragSession.provider(for: payload)
+            }
+            return NSItemProvider()
+        } preview: {
+            DragPreview(
+                name: entry.name.isEmpty ? entry.path : entry.name,
+                icon: FileAppearance.icon(for: entry),
+                extra: extra
+            )
+        }
     }
 }
 
 struct FTPBrowserView: View {
     @EnvironmentObject private var state: AppState
     @ObservedObject var session: FTPSession
+
+    private var items: [RemoteListingItem] {
+        session.items.sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory && !rhs.isDirectory }
+            let ascending = state.ftpSortAscending
+            let result: Bool
+            switch state.ftpSort {
+            case .name: result = lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            case .date: result = (lhs.modified ?? .distantPast) < (rhs.modified ?? .distantPast)
+            case .type: result = (lhs.isDirectory ? "Folder" : "File").localizedStandardCompare(rhs.isDirectory ? "Folder" : "File") == .orderedAscending
+            case .size: result = lhs.size < rhs.size
+            }
+            return ascending ? result : !result
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -446,27 +744,50 @@ struct FTPBrowserView: View {
             .padding(10)
             .background(.bar)
 
-            Table(session.items, selection: $session.selectedIDs) {
-                TableColumn("Name") { item in
-                    Label(item.name, systemImage: item.isDirectory ? "folder" : "doc")
+            if state.browserLayout == .grid {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108, maximum: 140), spacing: 12)], spacing: 16) {
+                        ForEach(items) { item in
+                            VStack(spacing: 8) {
+                                Image(systemName: item.isDirectory ? "folder.fill" : "doc")
+                                    .font(.system(size: 28, weight: .medium))
+                                    .foregroundStyle(item.isDirectory ? Color.accentColor : Color.primary)
+                                    .frame(width: 72, height: 72)
+                                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                Text(item.name)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 96)
+                            }
+                            .onTapGesture(count: 2) { state.ftpOpen(item) }
+                            .onTapGesture { session.selectedIDs = [item.id] }
+                        }
+                    }
+                    .padding(16)
                 }
-                TableColumn("Size") { item in
-                    Text(item.sizeLabel).foregroundStyle(.secondary).monospacedDigit()
+            } else {
+                Table(items, selection: $session.selectedIDs) {
+                    TableColumn("Name") { item in
+                        Label(item.name, systemImage: item.isDirectory ? "folder" : "doc")
+                    }
+                    TableColumn("Size") { item in
+                        Text(item.sizeLabel).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    .width(80)
+                    TableColumn("Permissions") { item in
+                        Text(item.permissions ?? "—").foregroundStyle(.tertiary).monospaced()
+                    }
+                    .width(110)
                 }
-                .width(80)
-                TableColumn("Permissions") { item in
-                    Text(item.permissions ?? "—").foregroundStyle(.tertiary).monospaced()
-                }
-                .width(110)
-            }
-            .onTapGesture(count: 2) {
-                if let item = session.items.first(where: { session.selectedIDs.contains($0.id) }) {
-                    state.ftpOpen(item)
-                }
-            }
-            .contextMenu(forSelectionType: String.self) { ids in
-                if let id = ids.first, let item = session.items.first(where: { $0.id == id }) {
-                    Button(item.isDirectory ? "Open" : "Download & Open") {
+                .contextMenu(forSelectionType: String.self) { ids in
+                    if let id = ids.first, let item = session.items.first(where: { $0.id == id }) {
+                        Button(item.isDirectory ? "Open Folder" : "Download & Open") {
+                            state.ftpOpen(item)
+                        }
+                    }
+                } primaryAction: { ids in
+                    if let id = ids.first, let item = session.items.first(where: { $0.id == id }) {
                         state.ftpOpen(item)
                     }
                 }
@@ -498,6 +819,13 @@ struct PreviewPane: View {
                         Text(ByteFormat.string(Int64(preview.data.count)))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Button {
+                            state.setShowPreviewPane(false)
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Hide preview")
                     }
                     .padding(12)
                     Divider()
@@ -531,12 +859,16 @@ struct PreviewPane: View {
                     }
                 }
             } else {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     Image(systemName: "eye")
                         .font(.title2)
                         .foregroundStyle(.tertiary)
                     Text("Select a file to preview")
                         .foregroundStyle(.secondary)
+                    Button("Hide Preview") {
+                        state.setShowPreviewPane(false)
+                    }
+                    .controlSize(.small)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -3,9 +3,32 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-swift build -c release --product UnZip
+INSTALL_LOCAL=0
+UNIVERSAL=1
+for arg in "$@"; do
+  case "$arg" in
+    --install) INSTALL_LOCAL=1 ;;
+    --arm64-only) UNIVERSAL=0 ;;
+  esac
+done
 
-BIN="$ROOT/.build/release/UnZip"
+BIN=""
+if [[ "$UNIVERSAL" -eq 1 ]]; then
+  swift build -c release --arch arm64 --product UnZip
+  swift build -c release --arch x86_64 --product UnZip
+  ARM="$(find "$ROOT/.build" -path '*arm64*release/UnZip' -type f | head -n 1)"
+  X86="$(find "$ROOT/.build" -path '*x86_64*release/UnZip' -type f | head -n 1)"
+  if [[ -n "$ARM" && -n "$X86" ]]; then
+    BIN="$ROOT/.build/UnZip-universal"
+    lipo -create "$ARM" "$X86" -output "$BIN"
+  fi
+fi
+
+if [[ -z "$BIN" ]]; then
+  swift build -c release --product UnZip
+  BIN="$ROOT/.build/release/UnZip"
+fi
+
 APP="$ROOT/dist/UnZip.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -30,5 +53,22 @@ if [[ -f "$ICON_PNG" ]]; then
 fi
 
 chmod +x "$APP/Contents/MacOS/UnZip"
+
+mkdir -p "$APP/Contents/Library/Services"
+cp -R "$ROOT/Resources/Zip with UnZip.workflow" "$APP/Contents/Library/Services/"
+
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
-echo "Built $APP"
+
+if [[ "$INSTALL_LOCAL" -eq 1 ]]; then
+  USER_APPS="$HOME/Applications"
+  mkdir -p "$USER_APPS"
+  rm -rf "$USER_APPS/UnZip.app"
+  cp -R "$APP" "$USER_APPS/UnZip.app"
+  LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  if [[ -x "$LSREGISTER" ]]; then
+    "$LSREGISTER" -f "$USER_APPS/UnZip.app" >/dev/null 2>&1 || true
+  fi
+  echo "Installed $USER_APPS/UnZip.app"
+fi
+
+echo "Built $APP ($(lipo -archs "$APP/Contents/MacOS/UnZip" 2>/dev/null || echo unknown))"

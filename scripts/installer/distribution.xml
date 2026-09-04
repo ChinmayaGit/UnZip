@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>UnZip</title>
+    <organization>com.unzip</organization>
+    <welcome file="welcome.html"/>
+    <conclusion file="conclusion.html"/>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.unzip.app"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.unzip.app" visible="false">
+        <pkg-ref id="com.unzip.app"/>
+    </choice>
+    <pkg-ref id="com.unzip.app" version="1.0" onConclusion="none">UnZip-component.pkg</pkg-ref>
+</installer-gui-script>

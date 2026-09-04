@@ -18,14 +18,36 @@ final class AppState: ObservableObject {
     @Published var showFTPSheet = false
     @Published var showCreateSheet = false
     @Published var showExtractSheet = false
+    @Published var compressJob: CompressJob?
+    @Published var dropOffer: DropOffer?
     @Published var passwordPrompt: PasswordPrompt?
     @Published var preview: PreviewContent?
+    @Published var browserLayout: BrowserLayout
+    @Published var entrySort: EntrySort
+    @Published var sortAscending: Bool
+    @Published var ftpSort: EntrySort
+    @Published var ftpSortAscending: Bool
+    @Published var showPreviewPane: Bool
 
     private let defaults = UserDefaults.standard
     private let recentsKey = "unzip.recents"
     private let bookmarksKey = "unzip.bookmarks"
+    private let layoutKey = "unzip.layout"
+    private let sortKey = "unzip.sort"
+    private let sortAscKey = "unzip.sortAsc"
+    private let previewKey = "unzip.showPreview"
 
     init() {
+        let savedLayout = BrowserLayout(rawValue: defaults.string(forKey: "unzip.layout") ?? "") ?? .details
+        let savedSort = EntrySort(rawValue: defaults.string(forKey: "unzip.sort") ?? "") ?? .name
+        let savedAscending = defaults.object(forKey: "unzip.sortAsc") as? Bool ?? true
+        let savedPreview = defaults.object(forKey: "unzip.showPreview") as? Bool ?? true
+        browserLayout = savedLayout
+        entrySort = savedSort
+        sortAscending = savedAscending
+        ftpSort = savedSort
+        ftpSortAscending = savedAscending
+        showPreviewPane = savedPreview
         recents = (defaults.stringArray(forKey: recentsKey) ?? []).prefix(12).compactMap {
             let url = URL(fileURLWithPath: $0)
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
@@ -34,6 +56,40 @@ final class AppState: ObservableObject {
            let saved = try? JSONDecoder().decode([FTPBookmark].self, from: data) {
             bookmarks = saved
         }
+    }
+
+    func setLayout(_ layout: BrowserLayout) {
+        browserLayout = layout
+        defaults.set(layout.rawValue, forKey: layoutKey)
+    }
+
+    func setShowPreviewPane(_ visible: Bool) {
+        showPreviewPane = visible
+        if !visible { preview = nil }
+        defaults.set(visible, forKey: previewKey)
+    }
+
+    func togglePreviewPane() {
+        setShowPreviewPane(!showPreviewPane)
+    }
+
+    func setSort(_ sort: EntrySort) {
+        if entrySort == sort {
+            sortAscending.toggle()
+        } else {
+            entrySort = sort
+            sortAscending = !sort.prefersDescending
+        }
+        defaults.set(entrySort.rawValue, forKey: sortKey)
+        defaults.set(sortAscending, forKey: sortAscKey)
+        ftpSort = entrySort
+        ftpSortAscending = sortAscending
+    }
+
+    func toggleSortDirection() {
+        sortAscending.toggle()
+        defaults.set(sortAscending, forKey: sortAscKey)
+        ftpSortAscending = sortAscending
     }
 
     var selectedDocument: OpenDocument? {
@@ -65,6 +121,25 @@ final class AppState: ObservableObject {
         }
     }
 
+    func receiveDropped(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        var archives: [URL] = []
+        var packable: [URL] = []
+        for url in urls {
+            if FormatDetector.isUnzippable(url) {
+                archives.append(url)
+            } else {
+                packable.append(url)
+            }
+        }
+        for archive in archives {
+            open(url: archive)
+        }
+        if !packable.isEmpty {
+            dropOffer = DropOffer(archives: archives, packable: packable)
+        }
+    }
+
     func open(url: URL) {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
@@ -79,7 +154,7 @@ final class AppState: ObservableObject {
                         title: url.lastPathComponent,
                         format: opened.format,
                         source: .file(url),
-                        localURL: url
+                        localURL: opened.resolvedURL
                     )
                     doc.entries = opened.entries
                     self.documents.append(doc)
@@ -87,7 +162,11 @@ final class AppState: ObservableObject {
                     self.selectedFTPID = nil
                     self.remember(url)
                     self.busyMessage = nil
-                    self.status = "\(opened.entries.count) items · \(opened.format.displayName)"
+                    if opened.parts > 1 {
+                        self.status = "\(opened.entries.count) items · \(opened.format.displayName) · \(opened.parts) parts joined"
+                    } else {
+                        self.status = "\(opened.entries.count) items · \(opened.format.displayName)"
+                    }
                     self.preview = nil
                 }
             } catch {
@@ -176,12 +255,61 @@ final class AppState: ObservableObject {
         }
     }
 
+    func openSelected() {
+        guard let document = selectedDocument, let entry = document.selectedEntries.first else { return }
+        openEntry(entry)
+    }
+
+    func goBack() { selectedDocument?.goBack() }
+    func goForward() { selectedDocument?.goForward() }
+    func goUp() { selectedDocument?.goUp() }
+
+    func openEntry(_ entry: ArchiveEntry) {
+        guard let document = selectedDocument else { return }
+        if entry.isDirectory {
+            if !document.filter.isEmpty { document.filter = "" }
+            document.navigate(to: entry.path)
+            preview = nil
+            status = entry.path.isEmpty ? document.title : entry.path
+            return
+        }
+        if entry.isNestedArchive {
+            openNestedArchive(entry)
+            return
+        }
+        previewEntry(entry)
+    }
+
+    func openNestedArchive(_ entry: ArchiveEntry) {
+        guard let document = selectedDocument, let url = document.localURL else { return }
+        busyMessage = "Opening \(entry.name)…"
+        let format = document.format
+        let password = document.password
+        Task.detached { [weak self] in
+            do {
+                let data = try ArchiveEngine.extractData(url: url, format: format, path: entry.path, password: password)
+                let dest = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name)
+                if FileManager.default.fileExists(atPath: dest.path) {
+                    try FileManager.default.removeItem(at: dest)
+                }
+                try data.write(to: dest)
+                await MainActor.run {
+                    self?.busyMessage = nil
+                    self?.open(url: dest)
+                }
+            } catch {
+                await MainActor.run {
+                    self?.busyMessage = nil
+                    self?.alertMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     func previewEntry(_ entry: ArchiveEntry) {
         guard let document = selectedDocument, let url = document.localURL else { return }
         if entry.isDirectory {
-            document.currentPath = entry.path
-            document.selectedIDs = []
-            preview = nil
+            openEntry(entry)
             return
         }
         busyMessage = "Loading preview…"
@@ -206,21 +334,125 @@ final class AppState: ObservableObject {
     }
 
     func createArchive(from sources: [URL], to destination: URL) {
-        busyMessage = "Creating archive…"
+        beginCompress(job: CompressJob(format: .zip, suggestedName: destination.deletingPathExtension().lastPathComponent, origin: .local(sources)), options: CompressOptions(), destination: destination)
+    }
+
+    func requestCompress(entries: [ArchiveEntry], format: CompressFormat) {
+        guard let document = selectedDocument else { return }
+        let name = entries.count == 1 ? entries[0].name : document.title
+        compressJob = CompressJob(
+            format: format,
+            suggestedName: URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent,
+            origin: .archive(documentID: document.id, entries: entries)
+        )
+    }
+
+    func requestCompress(local sources: [URL], format: CompressFormat = .zip) {
+        let name = sources.first?.deletingPathExtension().lastPathComponent ?? "Archive"
+        compressJob = CompressJob(format: format, suggestedName: name, origin: .local(sources))
+    }
+
+    func destinationForCompress(job: CompressJob, format: CompressFormat) -> URL? {
+        switch job.origin {
+        case .local(let urls):
+            return ArchiveWriter.destinationBeside(sources: urls, name: job.suggestedName, format: format)
+        case .archive:
+            if let document = documents.first(where: { $0.id == job.documentID }),
+               case .file(let url) = document.source {
+                return ArchiveWriter.uniqueURL(
+                    in: url.deletingLastPathComponent(),
+                    name: job.suggestedName,
+                    format: format
+                )
+            }
+            if let document = documents.first(where: { $0.id == job.documentID }), let url = document.localURL {
+                return ArchiveWriter.uniqueURL(
+                    in: url.deletingLastPathComponent(),
+                    name: job.suggestedName,
+                    format: format
+                )
+            }
+            return nil
+        }
+    }
+
+    func beginCompress(job: CompressJob, options: CompressOptions, destination: URL) {
+        compressJob = nil
+        busyMessage = "Compressing \(destination.lastPathComponent)…"
+        progress = 0.2
+        let document = documents.first(where: { $0.id == job.documentID })
+        let snapshot: ArchiveSnapshot? = document.flatMap { doc in
+            guard let url = doc.localURL else { return nil }
+            return ArchiveSnapshot(url: url, format: doc.format, password: doc.password, entries: doc.entries)
+        }
         Task.detached { [weak self] in
             do {
-                try ArchiveWriter.createZip(from: sources, to: destination)
+                let sources = try Self.prepareSources(job: job, snapshot: snapshot)
+                try ArchiveWriter.create(from: sources, to: destination, options: options)
                 await MainActor.run {
                     self?.busyMessage = nil
-                    self?.status = "Created \(destination.lastPathComponent)"
+                    self?.progress = nil
+                    self?.status = options.splitBytes > 0
+                        ? "Created split \(options.format.displayName) · \(destination.path)"
+                        : "Created \(destination.path)"
+                    ArchiveEngine.reveal(destination)
                     self?.open(url: destination)
                 }
             } catch {
                 await MainActor.run {
                     self?.busyMessage = nil
+                    self?.progress = nil
                     self?.alertMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    private struct ArchiveSnapshot: Sendable {
+        var url: URL
+        var format: ArchiveFormat
+        var password: String?
+        var entries: [ArchiveEntry]
+    }
+
+    nonisolated private static func prepareSources(job: CompressJob, snapshot: ArchiveSnapshot?) throws -> [URL] {
+        switch job.origin {
+        case .local(let urls):
+            return urls
+        case .archive(_, let entries):
+            guard let snapshot else { throw UnZipError.failed("Archive is no longer open.") }
+            let staging = FileManager.default.temporaryDirectory.appendingPathComponent("UnZip-pack-\(UUID().uuidString)", isDirectory: true)
+            let extracted = staging.appendingPathComponent("src", isDirectory: true)
+            let packed = staging.appendingPathComponent("out", isDirectory: true)
+            try FileManager.default.createDirectory(at: extracted, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: packed, withIntermediateDirectories: true)
+            let expanded = entries.flatMap { root -> [ArchiveEntry] in
+                if root.isDirectory {
+                    return snapshot.entries.filter { $0.path == root.path || $0.path.hasPrefix(root.path + "/") }
+                }
+                return [root]
+            }
+            try ArchiveEngine.extract(
+                url: snapshot.url,
+                format: snapshot.format,
+                destination: extracted,
+                entries: expanded.isEmpty ? nil : expanded,
+                password: snapshot.password
+            )
+            for entry in entries {
+                let source = extracted.appendingPathComponent(entry.path)
+                let dest = packed.appendingPathComponent(entry.name)
+                if FileManager.default.fileExists(atPath: source.path) {
+                    try FileManager.default.copyItem(at: source, to: dest)
+                } else if let match = FileManager.default.enumerator(at: extracted, includingPropertiesForKeys: nil)?
+                    .compactMap({ $0 as? URL })
+                    .first(where: { $0.lastPathComponent == entry.name }) {
+                    try FileManager.default.copyItem(at: match, to: dest)
+                }
+            }
+            let items = try FileManager.default.contentsOfDirectory(at: packed, includingPropertiesForKeys: nil)
+            guard !items.isEmpty else { throw UnZipError.failed("Could not prepare files to compress.") }
+            return items
         }
     }
 

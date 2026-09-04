@@ -52,8 +52,12 @@ enum ArchiveFormat: String, CaseIterable, Identifiable, Sendable {
         if name.hasSuffix(".tar.bz2") || name.hasSuffix(".tbz") || name.hasSuffix(".tbz2") { return .tarBz2 }
         if name.hasSuffix(".tar.xz") || name.hasSuffix(".txz") { return .tarXz }
         if name.hasSuffix(".tar.zst") || name.hasSuffix(".tzst") { return .tarZst }
-        switch url.pathExtension.lowercased() {
-        case "zip", "zipx", "jar", "war", "ear", "apk", "ipa", "whl", "egg", "nupkg": return .zip
+        let ext = url.pathExtension.lowercased()
+        if ext.hasPrefix("z"), ext != "zip", ext != "zipx", Int(ext.dropFirst()) != nil {
+            return .zip
+        }
+        switch ext {
+        case "zip", "zipx", "jar", "war", "ear", "apk", "ipa", "whl", "egg", "nupkg", "001": return .zip
         case "rar": return .rar
         case "7z": return .sevenZ
         case "tar": return .tar
@@ -91,6 +95,112 @@ struct ArchiveEntry: Identifiable, Hashable, Sendable {
         if isDirectory { return "—" }
         return ByteFormat.string(uncompressedSize > 0 ? uncompressedSize : compressedSize)
     }
+
+    var kindLabel: String {
+        if isDirectory { return "Folder" }
+        if encrypted { return "Encrypted" }
+        let ext = URL(fileURLWithPath: name).pathExtension.uppercased()
+        return ext.isEmpty ? "File" : ext
+    }
+
+    var dateLabel: String {
+        guard let modified else { return "—" }
+        return Self.dateFormatter.string(from: modified)
+    }
+
+    var isNestedArchive: Bool {
+        guard !isDirectory else { return false }
+        let format = ArchiveFormat.from(url: URL(fileURLWithPath: name))
+        switch format {
+        case .zip, .rar, .sevenZ, .tar, .tarGz, .tarBz2, .tarXz, .tarZst, .iso, .dmg, .xar, .cab, .lha:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+enum BrowserLayout: String, CaseIterable, Identifiable {
+    case details, grid
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .details: "Details"
+        case .grid: "Grid"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .details: "list.bullet"
+        case .grid: "square.grid.2x2"
+        }
+    }
+}
+
+enum EntrySort: String, CaseIterable, Identifiable {
+    case name, date, type, size
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name: "Name"
+        case .date: "Date"
+        case .type: "Type"
+        case .size: "Size"
+        }
+    }
+
+    var prefersDescending: Bool { self == .date || self == .size }
+}
+
+enum FileAppearance {
+    static func icon(for entry: ArchiveEntry) -> String {
+        if entry.isDirectory { return "folder.fill" }
+        if entry.isNestedArchive { return ArchiveFormat.from(url: URL(fileURLWithPath: entry.name)).systemImage }
+        switch URL(fileURLWithPath: entry.name).pathExtension.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp", "icns": return "photo"
+        case "pdf": return "doc.richtext"
+        case "txt", "md", "log", "rtf": return "doc.plaintext"
+        case "mp3", "wav", "aiff", "m4a", "aac": return "waveform"
+        case "mp4", "mov", "m4v": return "film"
+        case "swift", "js", "ts", "py", "json", "xml", "html", "css": return "chevron.left.forwardslash.chevron.right"
+        default: return "doc"
+        }
+    }
+
+    static func sort(_ a: ArchiveEntry, _ b: ArchiveEntry, by sort: EntrySort, ascending: Bool) -> Bool {
+        if a.isDirectory != b.isDirectory { return a.isDirectory && !b.isDirectory }
+        let ordered: Bool
+        switch sort {
+        case .name:
+            ordered = a.name.localizedStandardCompare(b.name) == .orderedAscending
+        case .date:
+            ordered = (a.modified ?? .distantPast) < (b.modified ?? .distantPast)
+        case .type:
+            let typeOrder = a.kindLabel.localizedStandardCompare(b.kindLabel)
+            ordered = typeOrder == .orderedSame
+                ? a.name.localizedStandardCompare(b.name) == .orderedAscending
+                : typeOrder == .orderedAscending
+        case .size:
+            let left = a.uncompressedSize > 0 ? a.uncompressedSize : a.compressedSize
+            let right = b.uncompressedSize > 0 ? b.uncompressedSize : b.compressedSize
+            ordered = left == right
+                ? a.name.localizedStandardCompare(b.name) == .orderedAscending
+                : left < right
+        }
+        return ascending ? ordered : !ordered
+    }
 }
 
 enum DocumentSource: Hashable, Sendable {
@@ -112,6 +222,8 @@ final class OpenDocument: Identifiable, ObservableObject {
     @Published var errorMessage: String?
     @Published var localURL: URL?
     @Published var password: String?
+    @Published var pathHistory: [String] = [""]
+    @Published var historyIndex = 0
 
     init(title: String, format: ArchiveFormat, source: DocumentSource, localURL: URL? = nil) {
         self.title = title
@@ -120,7 +232,11 @@ final class OpenDocument: Identifiable, ObservableObject {
         self.localURL = localURL
     }
 
-    var visibleEntries: [ArchiveEntry] {
+    var canGoBack: Bool { historyIndex > 0 }
+    var canGoForward: Bool { historyIndex < pathHistory.count - 1 }
+    var canGoUp: Bool { !currentPath.isEmpty }
+
+    func visibleEntries(sort: EntrySort, ascending: Bool) -> [ArchiveEntry] {
         let children = entries.filter { entry in
             if entry.path == currentPath { return false }
             if currentPath.isEmpty {
@@ -129,10 +245,12 @@ final class OpenDocument: Identifiable, ObservableObject {
             return entry.parentPath == currentPath
         }
         let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
-        if query.isEmpty { return children.sorted(by: Self.sort) }
-        return entries
-            .filter { $0.path.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query) }
-            .sorted(by: Self.sort)
+        let pool = query.isEmpty
+            ? children
+            : entries.filter {
+                $0.path.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query)
+            }
+        return pool.sorted { FileAppearance.sort($0, $1, by: sort, ascending: ascending) }
     }
 
     var breadcrumb: [String] {
@@ -144,9 +262,42 @@ final class OpenDocument: Identifiable, ObservableObject {
         entries.filter { selectedIDs.contains($0.id) }
     }
 
-    static func sort(_ a: ArchiveEntry, _ b: ArchiveEntry) -> Bool {
-        if a.isDirectory != b.isDirectory { return a.isDirectory && !b.isDirectory }
-        return a.name.localizedStandardCompare(b.name) == .orderedAscending
+    func navigate(to path: String) {
+        guard path != currentPath else { return }
+        if historyIndex < pathHistory.count - 1 {
+            pathHistory = Array(pathHistory.prefix(historyIndex + 1))
+        }
+        pathHistory.append(path)
+        historyIndex = pathHistory.count - 1
+        currentPath = path
+        selectedIDs = []
+    }
+
+    func goBack() {
+        guard canGoBack else { return }
+        historyIndex -= 1
+        currentPath = pathHistory[historyIndex]
+        selectedIDs = []
+    }
+
+    func goForward() {
+        guard canGoForward else { return }
+        historyIndex += 1
+        currentPath = pathHistory[historyIndex]
+        selectedIDs = []
+    }
+
+    func goUp() {
+        guard canGoUp else { return }
+        if let slash = currentPath.lastIndex(of: "/") {
+            navigate(to: String(currentPath[..<slash]))
+        } else {
+            navigate(to: "")
+        }
+    }
+
+    func goToBreadcrumb(index: Int) {
+        navigate(to: breadcrumb.prefix(index + 1).joined(separator: "/"))
     }
 }
 

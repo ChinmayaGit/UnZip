@@ -19,9 +19,13 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>4</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 UnZip</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>
@@ -69,6 +73,53 @@
 				<string>ipa</string>
 				<string>jar</string>
 			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder or File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+				<string>public.directory</string>
+				<string>public.data</string>
+				<string>public.item</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Zip with UnZip</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>zipWithUnZip</string>
+			<key>NSPortName</key>
+			<string>UnZip</string>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.folder</string>
+				<string>public.directory</string>
+				<string>public.data</string>
+			</array>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSApplicationIdentifier</key>
+				<string>com.apple.finder</string>
+				<key>NSTextContent</key>
+				<array>
+					<string>FilePath</string>
+					<string>URL</string>
+				</array>
+			</dict>
+			<key>NSTimeout</key>
+			<string>30000</string>
 		</dict>
 	</array>
 	<key>UTImportedTypeDeclarations</key>

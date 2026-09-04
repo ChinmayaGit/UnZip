@@ -105,8 +105,10 @@ enum Toolchain {
     static var lsar: String? { ProcessRunner.which("lsar") }
     static var sevenZip: String? { ProcessRunner.which("7z") ?? ProcessRunner.which("7zz") }
     static var unrar: String? { ProcessRunner.which("unrar") }
+    static var rar: String? { ProcessRunner.which("rar") }
     static var xz: String? { ProcessRunner.which("xz") }
 
     static var rarReady: Bool { unar != nil || sevenZip != nil || unrar != nil }
+    static var rarCreateReady: Bool { rar != nil }
     static var sevenReady: Bool { sevenZip != nil || unar != nil }
 }
