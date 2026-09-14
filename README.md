@@ -4,6 +4,24 @@ A native macOS app for browsing and extracting ZIP, RAR, ISO, TAR, 7Z, and DMG a
 
 Requires **macOS 14** or later. Works on **Apple Silicon** and **Intel**.
 
+## Screenshots
+
+Drop an archive to open it, or drop a folder or file to zip it.
+
+![UnZip welcome screen](Pics/1.png)
+
+Create a ZIP or RAR with High, Medium, or Low compression, and optional split volumes.
+
+![Create archive](Pics/2.png)
+
+Connect to an FTP, FTPS, or SFTP server and browse remote files without leaving the app.
+
+![Connect to server](Pics/3.png)
+
+In Finder, right-click a folder or file → **Services → Zip with UnZip**.
+
+![Finder Zip with UnZip](Pics/4.png)
+
 ## Install
 
 Use any one of the files in `dist/`:
