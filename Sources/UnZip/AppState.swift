@@ -586,6 +586,32 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func openFiles(_ urls: [URL], with application: URL) {
+        OpenWith.open(urls, with: application)
+        let name = FileManager.default.displayName(atPath: application.path)
+        if urls.count == 1 {
+            status = "Opened \(urls[0].lastPathComponent) with \(name)"
+        } else {
+            status = "Opened \(urls.count) items with \(name)"
+        }
+    }
+
+    func setDefaultOpenWith(_ application: URL, for file: URL) {
+        let name = FileManager.default.displayName(atPath: application.path)
+        OpenWith.setDefault(application, for: file) { [weak self] error in
+            Task { @MainActor in
+                if let error {
+                    self?.alertMessage = error
+                } else {
+                    let kind = file.pathExtension.isEmpty
+                        ? (OpenWith.contentType(for: file)?.localizedDescription ?? "this type")
+                        : ".\(file.pathExtension)"
+                    self?.status = "\(name) is now the default for \(kind)"
+                }
+            }
+        }
+    }
+
     func previewFileSelection(_ ids: Set<String>) {
         guard isShowingFiles, showPreviewPane, ids.count == 1,
               let item = fileBrowser.items.first(where: { $0.id == ids.first }),

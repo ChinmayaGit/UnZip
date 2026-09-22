@@ -15,6 +15,7 @@ struct FileBrowserView: View {
     @ViewState private var marqueeBaseIDs: Set<String> = []
     @ViewState private var lastClickID: String?
     @ViewState private var lastClickAt = Date.distantPast
+    @ViewState private var pressSelectID: String?
 
     private var appearance: AppearancePreferences { state.appearance }
 
@@ -173,12 +174,16 @@ struct FileBrowserView: View {
                 guard item.canEnter else { return false }
                 return acceptDrop(providers, into: item.url)
             }
+            .modifier(PressToSelect(item: item, onPress: { selectOnPress(item) }, onEnd: { clearPress(item) }))
+            .onTapGesture(count: 2) {
+                state.openFileItem(item)
+            }
             .onTapGesture {
                 handleItemClick(item)
             }
             .listRowBackground(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(browser.selectedIDs.contains(item.id) ? Color.accentColor.opacity(0.22) : Color.clear)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(browser.selectedIDs.contains(item.id) ? Color(red: 0.35, green: 0.62, blue: 1.0).opacity(0.28) : Color.clear)
                     .padding(.horizontal, 4)
             )
             .contextMenu {
@@ -226,7 +231,7 @@ struct FileBrowserView: View {
                 .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
                 .coordinateSpace(name: "files")
                 .onPreferenceChange(ItemFrameKey.self) { itemFrames = $0 }
-                .gesture(marqueeGesture)
+                .simultaneousGesture(marqueeGesture)
             }
             .background(Color(nsColor: .textBackgroundColor))
             .contextMenu {
@@ -237,33 +242,39 @@ struct FileBrowserView: View {
 
     private func gridItem(_ item: FileItem, icon: CGFloat, tile: CGFloat) -> some View {
         let selected = browser.selectedIDs.contains(item.id)
-        return VStack(spacing: 8) {
+        let glow = Color(red: 0.45, green: 0.72, blue: 1.0)
+        return VStack(spacing: 6) {
             glyph(item, size: icon, corner: layout == .gallery ? 16 : 12, selected: selected)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(selected ? glow.opacity(0.32) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(selected ? glow.opacity(0.85) : Color.clear, lineWidth: 2)
+                )
             Text(item.displayName(showExtension: appearance.showExtensions))
                 .font(layout == .extraLarge || layout == .gallery ? .callout : .caption)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .frame(width: tile - 12, height: 32)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
                 .background(
                     selected ? Color.accentColor : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    in: Capsule()
                 )
                 .foregroundStyle(selected ? Color.white : Color.primary)
+                .frame(width: tile - 8)
         }
-        .padding(.vertical, 6)
         .frame(width: tile)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(selected ? Color.accentColor.opacity(0.7) : Color.clear, lineWidth: 2)
-        )
         .contentShape(Rectangle())
         .background(itemFrameReporter(item.id))
         .fileDrag(item, browser: browser)
+        .modifier(PressToSelect(item: item, onPress: { selectOnPress(item) }, onEnd: { clearPress(item) }))
+        .onTapGesture(count: 2) {
+            state.openFileItem(item)
+        }
         .onTapGesture {
             handleItemClick(item)
         }
@@ -550,12 +561,34 @@ struct FileBrowserView: View {
         browser.selectionAnchorID = nil
     }
 
+    private func selectOnPress(_ item: FileItem) {
+        if (NSApp.currentEvent?.clickCount ?? 1) >= 2 {
+            select(item, keepIfAlreadySelected: true)
+            state.openFileItem(item)
+            pressSelectID = item.id
+            return
+        }
+        if pressSelectID == item.id { return }
+        pressSelectID = item.id
+        if NSEvent.pressedMouseButtons == 2 || NSEvent.modifierFlags.contains(.control) {
+            select(item, keepIfAlreadySelected: true)
+        } else {
+            select(item)
+        }
+    }
+
+    private func clearPress(_ item: FileItem) {
+        if pressSelectID == item.id {
+            pressSelectID = nil
+        }
+    }
+
     private func handleItemClick(_ item: FileItem) {
         let now = Date()
-        let isDouble = lastClickID == item.id && now.timeIntervalSince(lastClickAt) < 0.4
+        let isDouble = lastClickID == item.id && now.timeIntervalSince(lastClickAt) < 0.5
         lastClickID = item.id
         lastClickAt = now
-        select(item, exclusive: isDouble)
+        select(item, exclusive: isDouble, keepIfAlreadySelected: true)
         if isDouble {
             state.openFileItem(item)
         }
@@ -615,6 +648,7 @@ struct FileBrowserView: View {
                 Button("ZIP…") { state.requestCompress(local: selected.map(\.url), format: .zip) }
                 Button("RAR…") { state.requestCompress(local: selected.map(\.url), format: .rar) }
             }
+            OpenWithMenu(urls: selected.map(\.resolvedURL))
             Button("Reveal in Finder") {
                 if let url = selected.first?.url { ArchiveEngine.reveal(url) }
             }
@@ -652,17 +686,14 @@ struct FileBrowserView: View {
             }
         } else if item.isImage {
             Button("View Image") { state.openImageGallery(item) }
-            Button("Open with Default App") { NSWorkspace.shared.open(item.url) }
         } else if item.isAudio || item.isVideo {
             Button(item.isVideo ? "Play Video" : "Play") { state.playMedia(item) }
-            Button("Open with Default App") { NSWorkspace.shared.open(item.url) }
         } else if item.isArchive {
             Button("Open Archive") { state.openFileItem(item) }
-            Button("Open with Default App") { NSWorkspace.shared.open(item.url) }
         } else {
             Button("Open") { state.openFileItem(item) }
-            Button("Open with Default App") { NSWorkspace.shared.open(item.url) }
         }
+        OpenWithMenu(urls: [item.resolvedURL])
         Button("Reveal in Finder") { ArchiveEngine.reveal(item.url) }
         Button("Details") { state.showDetails(for: [item]) }
         Button("Rename") { state.beginRename(item) }
@@ -698,7 +729,7 @@ struct FileGlyph: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor))
+                .fill(selected ? Color.clear : Color(nsColor: .controlBackgroundColor))
             if shouldShowImage, let image = covers.image(for: item.url) {
                 fitted(image)
             } else {
@@ -711,7 +742,7 @@ struct FileGlyph: View {
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(selected ? Color.clear : Color.primary.opacity(0.08), lineWidth: 1)
         }
     }
 
@@ -779,6 +810,20 @@ private extension View {
             DragGesture(minimumDistance: 3).onChanged { _ in
                 browser.draggingURLs = urls
             }
+        )
+    }
+}
+
+private struct PressToSelect: ViewModifier {
+    let item: FileItem
+    var onPress: () -> Void
+    var onEnd: () -> Void
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in onPress() }
+                .onEnded { _ in onEnd() }
         )
     }
 }

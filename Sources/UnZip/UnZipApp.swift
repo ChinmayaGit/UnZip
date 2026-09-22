@@ -42,6 +42,10 @@ struct UnZipApp: App {
                 Button("Extract…") { state.extractSelected() }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(state.selectedDocument == nil)
+                Divider()
+                OpenWithMenu(urls: state.fileBrowser.selectedItems.map(\.resolvedURL))
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
+                    .environmentObject(state)
             }
             CommandGroup(replacing: .pasteboard) {
                 Button("Copy") { state.copySelectedFiles() }

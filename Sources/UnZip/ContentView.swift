@@ -66,6 +66,7 @@ struct ContentView: View {
         }
         .sheet(item: $state.fileDetails) { target in
             FileDetailsSheet(items: target.items)
+                .environmentObject(state)
         }
         .sheet(item: $state.renameTarget) { item in
             RenameSheet(item: item)

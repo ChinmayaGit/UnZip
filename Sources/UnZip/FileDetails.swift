@@ -52,12 +52,14 @@ struct FileDetailsSheet: View {
         if let extra = info.dimensions {
             detailRow("Dimensions", extra)
         }
+        detailRow("Opens with", OpenWith.defaultApp(for: item.resolvedURL)?.name ?? "—")
         HStack {
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(info.path, forType: .string)
             }
             Button("Reveal in Finder") { ArchiveEngine.reveal(item.url) }
+            OpenWithMenu(urls: [item.resolvedURL])
             Spacer()
         }
         .padding(.top, 8)

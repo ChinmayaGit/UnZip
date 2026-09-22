@@ -2,7 +2,6 @@ import AppKit
 import AVFoundation
 import AVKit
 import Combine
-import Darwin
 import SwiftUI
 
 enum RepeatMode: String, CaseIterable, Identifiable {
@@ -234,14 +233,14 @@ final class MediaPlayback: ObservableObject {
         artwork = nil
         currentTime = 0
         duration = 0
-        let playerItem = AVPlayerItem(url: url)
-        player.replaceCurrentItem(with: playerItem)
-        observeEnd(of: playerItem)
         loadMetadata(for: url)
-        player.play()
-        isPlaying = true
         if media.isVideo {
-            videoFallbackTask = Task { await startVideo(url, item: playerItem) }
+            player.replaceCurrentItem(with: nil)
+            playbackNote = "Preparing video…"
+            isPlaying = false
+            videoFallbackTask = Task { await startVideo(url) }
+        } else {
+            playURL(url)
         }
     }
 
@@ -257,35 +256,45 @@ final class MediaPlayback: ObservableObject {
         }
     }
 
-    private func startVideo(_ url: URL, item playerItem: AVPlayerItem) async {
-        if let cached = cachedTranscode(for: url) {
+    private func startVideo(_ url: URL) async {
+        if await assetHasPlayableVideo(url) {
             guard !Task.isCancelled else { return }
-            playExternal(cached, note: nil)
+            playURL(url)
+            playbackNote = nil
             return
         }
-        let tracks = (try? await playerItem.asset.loadTracks(withMediaType: .video)) ?? []
-        let playable = await videoTrackIsPlayable(tracks.first)
-        guard !Task.isCancelled else { return }
-        if playable { return }
-        playbackNote = "Buffering video…"
-        if let stream = await startVLCStream(for: url) {
+        if let cached = cachedVideo(for: url), await assetHasPlayableVideo(cached) {
             guard !Task.isCancelled else { return }
-            playExternal(stream, note: nil)
-        } else {
-            playbackNote = "This video uses VP9, which macOS can’t decode. Open it in VLC for the picture."
+            playURL(cached)
+            playbackNote = nil
+            return
+        }
+        playbackNote = "Preparing video…"
+        if let local = await transcodeToFile(url), await assetHasPlayableVideo(local) {
+            guard !Task.isCancelled else { return }
+            playURL(local)
+            playbackNote = nil
+        } else if FileManager.default.fileExists(atPath: "/Applications/VLC.app") {
             openInVLC(url)
+            playbackNote = "Opened in VLC so you can see the picture."
+        } else {
+            playbackNote = "This video’s picture can’t play here. Install VLC to watch it."
         }
     }
 
-    private func playExternal(_ url: URL, note: String?) {
+    private func assetHasPlayableVideo(_ url: URL) async -> Bool {
+        let asset = AVURLAsset(url: url)
+        let tracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
+        return await videoTrackIsPlayable(tracks.first)
+    }
+
+    private func playURL(_ url: URL) {
         clearEndObserver()
         let next = AVPlayerItem(url: url)
-        next.preferredForwardBufferDuration = 4
         player.replaceCurrentItem(with: next)
         observeEnd(of: next)
         player.play()
         isPlaying = true
-        playbackNote = note
     }
 
     private func videoTrackIsPlayable(_ track: AVAssetTrack?) async -> Bool {
@@ -293,11 +302,10 @@ final class MediaPlayback: ObservableObject {
         return (try? await track.load(.isPlayable)) ?? false
     }
 
-    private func cachedTranscode(for url: URL) -> URL? {
+    private func cachedVideo(for url: URL) -> URL? {
         let dest = transcodeCacheURL(for: url)
-        guard FileManager.default.fileExists(atPath: dest.path) else { return nil }
         let size = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        return size > 10_000 ? dest : nil
+        return size > 80_000 ? dest : nil
     }
 
     private func transcodeCacheURL(for url: URL) -> URL {
@@ -310,28 +318,24 @@ final class MediaPlayback: ObservableObject {
             hash = ((hash << 5) &+ hash) &+ UInt64(byte)
         }
         let stamp = Int((try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0)
-        return folder.appendingPathComponent("\(hash)-\(stamp).ts")
+        return folder.appendingPathComponent(String(format: "%016llx-%d.mp4", hash, stamp))
     }
 
-    private func startVLCStream(for url: URL) async -> URL? {
+    private func transcodeToFile(_ url: URL) async -> URL? {
         let vlc = URL(fileURLWithPath: "/Applications/VLC.app/Contents/MacOS/VLC")
         guard FileManager.default.isExecutableFile(atPath: vlc.path) else { return nil }
-        let port = unusedPort()
-        let cache = transcodeCacheURL(for: url)
-        try? FileManager.default.removeItem(at: cache)
+        let dest = transcodeCacheURL(for: url)
+        try? FileManager.default.removeItem(at: dest)
         let process = Process()
         process.executableURL = vlc
         process.arguments = [
             "-I", "dummy",
             "--no-media-library",
             "--no-osd",
-            "--network-caching=300",
-            "--live-caching=300",
+            "--play-and-exit",
             url.path,
             "--sout",
-            "#transcode{vcodec=h264,venc=videotoolbox,vb=2500,width=1280,fps=30,acodec=mp4a,ab=128,channels=2,samplerate=44100}:duplicate{dst=standard{access=http,mux=ts,dst=127.0.0.1:\(port)/},dst=standard{access=file,mux=ts,dst=\(cache.path)}}",
-            "--sout-all",
-            "--sout-keep"
+            "#transcode{vcodec=h264,venc=x264{preset=ultrafast,tune=fastdecode,keyint=30},vb=1800,width=960,acodec=mp4a,ab=96,channels=2,samplerate=44100}:standard{access=file,mux=mp4,dst=\(dest.path)}"
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -341,58 +345,17 @@ final class MediaPlayback: ObservableObject {
             return nil
         }
         vlcProcess = process
-        for _ in 0..<25 {
+        while process.isRunning {
             if Task.isCancelled {
                 stopVLC()
+                try? FileManager.default.removeItem(at: dest)
                 return nil
             }
-            if tcpOpen(port: port) {
-                return URL(string: "http://127.0.0.1:\(port)/")
-            }
-            try? await Task.sleep(nanoseconds: 120_000_000)
+            try? await Task.sleep(nanoseconds: 200_000_000)
         }
-        return URL(string: "http://127.0.0.1:\(port)/")
-    }
-
-    private func unusedPort() -> Int {
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        addr.sin_port = 0
-        let sock = socket(AF_INET, SOCK_STREAM, 0)
-        guard sock >= 0 else { return Int.random(in: 18000...18999) }
-        defer { close(sock) }
-        _ = withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getsockname(sock, $0, &length)
-            }
-        }
-        let port = Int(UInt16(bigEndian: addr.sin_port))
-        return port == 0 ? Int.random(in: 18000...18999) : port
-    }
-
-    private func tcpOpen(port: Int) -> Bool {
-        let sock = socket(AF_INET, SOCK_STREAM, 0)
-        guard sock >= 0 else { return false }
-        defer { close(sock) }
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(UInt16(port).bigEndian)
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let result = withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                Darwin.connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        return result == 0
+        vlcProcess = nil
+        let size = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        return size > 80_000 ? dest : nil
     }
 
     private func openInVLC(_ url: URL) {
@@ -869,6 +832,7 @@ struct VideoPlayerPane: View {
                     VStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
+                            .tint(.white)
                         Text(note)
                             .font(.callout)
                             .multilineTextAlignment(.center)
@@ -936,43 +900,19 @@ struct VideoPlayerPane: View {
 struct VideoCanvas: NSViewRepresentable {
     let player: AVPlayer
 
-    func makeNSView(context: Context) -> PlayerLayerView {
-        let view = PlayerLayerView()
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
         view.player = player
+        view.controlsStyle = .none
+        view.videoGravity = .resizeAspect
+        view.showsFullScreenToggleButton = false
+        view.updatesNowPlayingInfoCenter = false
         return view
     }
 
-    func updateNSView(_ nsView: PlayerLayerView, context: Context) {
-        nsView.player = player
-    }
-}
-
-final class PlayerLayerView: NSView {
-    var player: AVPlayer? {
-        didSet { playerLayer.player = player }
-    }
-
-    private let playerLayer = AVPlayerLayer()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
-        playerLayer.videoGravity = .resizeAspect
-        layer?.addSublayer(playerLayer)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layout() {
-        super.layout()
-        playerLayer.frame = bounds
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        playerLayer.frame = bounds
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        if nsView.player !== player {
+            nsView.player = player
+        }
     }
 }
