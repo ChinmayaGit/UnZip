@@ -17,7 +17,7 @@ If macOS blocks the first launch, Control-click UnZip → **Open**. That is Gate
 **What it is for:** Browse your Mac like Finder, without leaving the app.
 
 1. Open UnZip. It starts in your last folder, or Home.
-2. Use the **sidebar**: Home, Desktop, Documents, Downloads, Pictures, Movies, Music, Applications.
+2. Use the **sidebar**: Home, Desktop, Documents, Downloads, Pictures, Movies, Music, Applications. Plug in a USB stick or external disk and it appears under **Devices**. Right-click a drive to **Eject**.
 3. Double-click a folder to enter it. Double-click a file to preview, play, or open it.
 4. Switch views on the tab bar: **Details**, **Grid**, **Large** (and more if you turn them on in Settings).
 5. Use **Filter** and **Sort** on the same bar. Search the current folder from the search field.
@@ -211,21 +211,21 @@ The page is a local HTTP server UnZip starts on your Mac. Use it on a trusted ne
 
 ## Settings
 
-**What it is for:** Theme, default folder covers, which views appear, sort, and the music bar.
+**What it is for:** Theme, folder covers, explorer views, which sidebar sections appear, and the music bar.
 
-Open **Settings…** (gear) or press **Command-comma**.
+Open **Settings…** (gear) or press **Command-comma**. Settings are grouped on the left.
 
 ![Settings](Pics/settings.png)
 
-| Section | What you can change |
+| Category | What you can change |
 | --- | --- |
-| Theme | System, Light, Dark, Midnight, Warm, Graphite |
-| Folder image | Default cover (first image / icon / custom) and fit |
-| Default folder icon | SF Symbol when a folder has no picture |
-| Views | Turn Details, List, Grid, Large, XL, Tiles, Gallery on or off |
-| Icon scale | 60%–200% |
-| Sort and filter | Default sort, folders first, hidden files, extensions, kind filter |
+| Appearance | System, Light, Dark, Midnight, Warm, Graphite |
+| Folder Images | Default cover (first image / icon / custom), fit, default folder symbol |
+| Explorer | Which views are on the tab bar, icon scale, sort, hidden files, extensions, kind filter |
+| Sidebar | Show or hide Favorites, Devices, Archives, Servers, Recent |
 | Playback | Music bar height (64–140 pt) |
+
+On the sidebar, archives, servers, and recent items have an **X** to close or remove them. Recent also has **Clear All**.
 
 Shuffle, auto-next, and loop live on the music player, not only in Settings.
 

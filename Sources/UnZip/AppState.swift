@@ -39,6 +39,7 @@ final class AppState: ObservableObject {
     @Published var gallery = ImageGallery()
     @Published var share = FileShare()
     @Published var showShareSheet = false
+    @Published var volumes = VolumeStore()
 
     private var cancellables = Set<AnyCancellable>()
     private let defaults = UserDefaults.standard
@@ -93,6 +94,12 @@ final class AppState: ObservableObject {
         share.objectWillChange
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        volumes.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+                self?.leaveMissingVolume()
             }
             .store(in: &cancellables)
         if !appearance.isLayoutEnabled(browserLayout) {
@@ -309,6 +316,29 @@ final class AppState: ObservableObject {
             fileBrowser.navigate(to: url)
         }
         status = "\(fileBrowser.items.count) items · \(fileBrowser.currentURL.path)"
+    }
+
+    func ejectVolume(_ volume: MountedVolume) {
+        if isShowingFiles, volume.contains(fileBrowser.currentURL) {
+            showFiles(at: FileLocation.home.url)
+        }
+        do {
+            try NSWorkspace.shared.unmountAndEjectDevice(at: volume.url)
+            volumes.refresh()
+            status = "Ejected \(volume.name)"
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func leaveMissingVolume() {
+        guard isShowingFiles else { return }
+        let current = fileBrowser.currentURL
+        guard current.path.hasPrefix("/Volumes/") else { return }
+        if volumes.volume(containing: current) != nil { return }
+        if FileManager.default.fileExists(atPath: current.path) { return }
+        showFiles(at: FileLocation.home.url)
+        status = "That drive was ejected."
     }
 
     func setLayout(_ layout: BrowserLayout) {
@@ -1272,6 +1302,17 @@ final class AppState: ObservableObject {
         }
     }
 
+    func removeRecent(_ url: URL) {
+        recents.removeAll { $0 == url }
+        defaults.set(recents.map(\.path), forKey: recentsKey)
+    }
+
+    func clearRecents() {
+        recents = []
+        defaults.set([String](), forKey: recentsKey)
+        status = "Cleared recent items"
+    }
+
     private func remember(_ url: URL) {
         recents.removeAll { $0 == url }
         recents.insert(url, at: 0)
@@ -1331,8 +1372,9 @@ struct PreviewContent: Identifiable {
 
     static func make(name: String, data: Data) -> PreviewContent {
         let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
-        let images = Set(["png", "jpg", "jpeg", "gif", "webp", "tif", "tiff", "bmp", "heic", "icns"])
-        if images.contains(ext), let image = NSImage(data: data) {
+        let images = Set(["png", "jpg", "jpeg", "gif", "webp", "tif", "tiff", "bmp", "heic", "icns", "ico", "cur", "avif"])
+        if images.contains(ext) || FolderCover.imageExtensions.contains(ext),
+           let image = IconFile.nsImage(from: data) {
             return PreviewContent(name: name, kind: .image, text: nil, image: image, data: data)
         }
         if ext == "pdf" {

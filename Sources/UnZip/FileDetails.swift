@@ -115,7 +115,7 @@ private struct FileDetailsInfo {
         formatter.timeStyle = .short
         created = values?.creationDate.map { formatter.string(from: $0) } ?? "—"
         modified = (values?.contentModificationDate ?? fallback.modified).map { formatter.string(from: $0) } ?? "—"
-        if FolderCover.isImage(url), let image = NSImage(contentsOf: url) {
+        if FolderCover.isImage(url), let image = IconFile.nsImage(at: url) {
             let size = image.size
             dimensions = "\(Int(size.width)) × \(Int(size.height))"
         } else {

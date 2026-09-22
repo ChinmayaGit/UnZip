@@ -286,6 +286,8 @@ struct ContentView: View {
 struct SidebarView: View {
     @EnvironmentObject private var state: AppState
 
+    private var appearance: AppearancePreferences { state.appearance }
+
     var body: some View {
         List(selection: Binding(
             get: {
@@ -296,6 +298,9 @@ struct SidebarView: View {
                 }) {
                     return "fav-\(favorite.id)"
                 }
+                if let volume = state.volumes.volume(containing: state.fileBrowser.currentURL) {
+                    return "vol-\(volume.id)"
+                }
                 return "files"
             },
             set: { value in
@@ -305,6 +310,9 @@ struct SidebarView: View {
                 } else if value.hasPrefix("fav-"),
                           let favorite = FileLocation.favorites.first(where: { "fav-\($0.id)" == value }) {
                     state.showFiles(at: favorite.url)
+                } else if value.hasPrefix("vol-"),
+                          let volume = state.volumes.volumes.first(where: { "vol-\($0.id)" == value }) {
+                    state.showFiles(at: volume.url)
                 } else if let doc = state.documents.first(where: { $0.id.uuidString == value }) {
                     state.selectedDocumentID = doc.id
                     state.selectedFTPID = nil
@@ -328,25 +336,41 @@ struct SidebarView: View {
                 }
                 .tag("files")
 
-                ForEach(FileLocation.favorites) { location in
-                    Label(location.title, systemImage: location.systemImage)
-                        .tag("fav-\(location.id)")
+                if appearance.showSidebarFavorites {
+                    ForEach(FileLocation.favorites) { location in
+                        Label(location.title, systemImage: location.systemImage)
+                            .tag("fav-\(location.id)")
+                    }
                 }
             }
 
-            if !state.documents.isEmpty {
+            if appearance.showSidebarDevices, !state.volumes.volumes.isEmpty {
+                Section("Devices") {
+                    ForEach(state.volumes.volumes) { volume in
+                        Label(volume.name, systemImage: volume.systemImage)
+                            .tag("vol-\(volume.id)")
+                            .contextMenu {
+                                Button("Open") { state.showFiles(at: volume.url) }
+                                Button("Reveal in Finder") { ArchiveEngine.reveal(volume.url) }
+                                if volume.isEjectable {
+                                    Divider()
+                                    Button("Eject") { state.ejectVolume(volume) }
+                                }
+                            }
+                    }
+                }
+            }
+
+            if appearance.showSidebarArchives, !state.documents.isEmpty {
                 Section("Archives") {
                     ForEach(state.documents) { document in
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(document.title).lineLimit(1)
-                                Text(document.format.displayName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: document.format.systemImage)
-                        }
+                        SidebarItemRow(
+                            title: document.title,
+                            subtitle: document.format.displayName,
+                            systemImage: document.format.systemImage,
+                            closeHelp: "Close",
+                            onClose: { state.close(document) }
+                        )
                         .tag(document.id.uuidString)
                         .onDrag {
                             if let payload = document.dragPayloadForCurrentFolder() {
@@ -375,59 +399,118 @@ struct SidebarView: View {
                 }
             }
 
-            Section("Servers") {
-                ForEach(state.ftpSessions) { session in
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.bookmark.name).lineLimit(1)
-                            Text("\(session.bookmark.protocolKind.displayName) · \(session.bookmark.host)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            if appearance.showSidebarServers {
+                Section("Servers") {
+                    ForEach(state.ftpSessions) { session in
+                        SidebarItemRow(
+                            title: session.bookmark.name,
+                            subtitle: "\(session.bookmark.protocolKind.displayName) · \(session.bookmark.host)",
+                            systemImage: session.isConnected ? "externaldrive.connected.to.line.below" : "network",
+                            closeHelp: "Disconnect",
+                            onClose: { state.disconnectFTP(session) }
+                        )
+                        .tag(session.id.uuidString)
+                        .contextMenu {
+                            Button("Disconnect", role: .destructive) {
+                                state.disconnectFTP(session)
+                            }
                         }
-                    } icon: {
-                        Image(systemName: session.isConnected ? "externaldrive.connected.to.line.below" : "network")
                     }
-                    .tag(session.id.uuidString)
-                    .contextMenu {
-                        Button("Disconnect", role: .destructive) {
-                            state.disconnectFTP(session)
+                    ForEach(state.bookmarks) { bookmark in
+                        SidebarItemRow(
+                            title: bookmark.name,
+                            subtitle: nil,
+                            systemImage: "bookmark",
+                            closeHelp: "Remove",
+                            onClose: { state.deleteBookmark(bookmark) },
+                            onOpen: { state.showFTPSheet = true }
+                        )
+                        .contextMenu {
+                            Button("Remove", role: .destructive) {
+                                state.deleteBookmark(bookmark)
+                            }
                         }
                     }
-                }
-                ForEach(state.bookmarks) { bookmark in
                     Button {
                         state.showFTPSheet = true
                     } label: {
-                        Label(bookmark.name, systemImage: "bookmark")
+                        Label("Connect to Server…", systemImage: "plus")
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button("Remove", role: .destructive) {
-                            state.deleteBookmark(bookmark)
-                        }
-                    }
-                }
-                Button {
-                    state.showFTPSheet = true
-                } label: {
-                    Label("Connect to Server…", systemImage: "plus")
                 }
             }
 
-            if !state.recents.isEmpty {
-                Section("Recent") {
+            if appearance.showSidebarRecents, !state.recents.isEmpty {
+                Section {
                     ForEach(state.recents, id: \.self) { url in
-                        Button {
-                            state.open(url: url)
-                        } label: {
-                            Label(url.lastPathComponent, systemImage: ArchiveFormat.from(url: url).systemImage)
+                        SidebarItemRow(
+                            title: url.lastPathComponent,
+                            subtitle: nil,
+                            systemImage: ArchiveFormat.from(url: url).systemImage,
+                            closeHelp: "Remove",
+                            onClose: { state.removeRecent(url) },
+                            onOpen: { state.open(url: url) }
+                        )
+                        .contextMenu {
+                            Button("Remove", role: .destructive) {
+                                state.removeRecent(url)
+                            }
+                            Button("Clear All", role: .destructive) {
+                                state.clearRecents()
+                            }
                         }
-                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    HStack {
+                        Text("Recent")
+                        Spacer()
+                        Button("Clear All") {
+                            state.clearRecents()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .onAppear { state.volumes.refresh() }
+    }
+}
+
+private struct SidebarItemRow: View {
+    let title: String
+    var subtitle: String?
+    let systemImage: String
+    let closeHelp: String
+    let onClose: () -> Void
+    var onOpen: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .lineLimit(1)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onOpen?()
+            }
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(closeHelp)
+        }
     }
 }
 

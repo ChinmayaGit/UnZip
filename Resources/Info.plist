@@ -150,6 +150,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>UnZip needs access to USB sticks and other removable disks so you can browse and open files on them.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>UnZip needs access to network drives so you can browse shared folders.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>UnZip uses the local network to share files with nearby devices and show a download page if they don’t have the app.</string>
 	<key>NSBonjourServices</key>

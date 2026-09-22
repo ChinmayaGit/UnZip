@@ -173,6 +173,21 @@ final class AppearancePreferences: ObservableObject {
     @Published var musicBarHeight: Double {
         didSet { persist() }
     }
+    @Published var showSidebarFavorites: Bool {
+        didSet { persist() }
+    }
+    @Published var showSidebarDevices: Bool {
+        didSet { persist() }
+    }
+    @Published var showSidebarArchives: Bool {
+        didSet { persist() }
+    }
+    @Published var showSidebarServers: Bool {
+        didSet { persist() }
+    }
+    @Published var showSidebarRecents: Bool {
+        didSet { persist() }
+    }
 
     private let defaults = UserDefaults.standard
     private let key = "unzip.appearance.v1"
@@ -199,6 +214,11 @@ final class AppearancePreferences: ObservableObject {
             defaultFolderSymbol = saved.defaultFolderSymbol
             folderOverrides = saved.folderOverrides
             musicBarHeight = min(140, max(64, saved.musicBarHeight ?? 88))
+            showSidebarFavorites = saved.showSidebarFavorites ?? true
+            showSidebarDevices = saved.showSidebarDevices ?? true
+            showSidebarArchives = saved.showSidebarArchives ?? true
+            showSidebarServers = saved.showSidebarServers ?? true
+            showSidebarRecents = saved.showSidebarRecents ?? true
         } else {
             theme = .system
             globalCover = CoverStyle()
@@ -211,6 +231,11 @@ final class AppearancePreferences: ObservableObject {
             defaultFolderSymbol = "folder.fill"
             folderOverrides = [:]
             musicBarHeight = 88
+            showSidebarFavorites = true
+            showSidebarDevices = true
+            showSidebarArchives = true
+            showSidebarServers = true
+            showSidebarRecents = true
         }
     }
 
@@ -328,6 +353,11 @@ final class AppearancePreferences: ObservableObject {
         var defaultFolderSymbol: String
         var folderOverrides: [String: CoverStyle]
         var musicBarHeight: Double?
+        var showSidebarFavorites: Bool?
+        var showSidebarDevices: Bool?
+        var showSidebarArchives: Bool?
+        var showSidebarServers: Bool?
+        var showSidebarRecents: Bool?
     }
 
     private func persist() {
@@ -342,7 +372,12 @@ final class AppearancePreferences: ObservableObject {
             kindFilter: kindFilter,
             defaultFolderSymbol: defaultFolderSymbol,
             folderOverrides: folderOverrides,
-            musicBarHeight: musicBarHeight
+            musicBarHeight: musicBarHeight,
+            showSidebarFavorites: showSidebarFavorites,
+            showSidebarDevices: showSidebarDevices,
+            showSidebarArchives: showSidebarArchives,
+            showSidebarServers: showSidebarServers,
+            showSidebarRecents: showSidebarRecents
         )
         if let data = try? JSONEncoder().encode(snapshot) {
             defaults.set(data, forKey: key)

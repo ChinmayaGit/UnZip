@@ -66,7 +66,7 @@ final class ImageGallery: ObservableObject {
         loadToken = token
         isLoading = image == nil
         Task.detached {
-            let loaded = NSImage(contentsOf: url)
+            let loaded = IconFile.nsImage(at: url)
             await MainActor.run {
                 guard self.loadToken == token else { return }
                 self.image = loaded

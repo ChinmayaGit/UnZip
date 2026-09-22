@@ -180,7 +180,7 @@ enum EntrySort: String, CaseIterable, Identifiable {
 enum FileAppearance {
     static func icon(forFileNamed name: String) -> String {
         switch URL(fileURLWithPath: name).pathExtension.lowercased() {
-        case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp", "icns", "ico": return "photo"
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp", "icns", "ico", "cur", "avif": return "photo"
         case "pdf": return "doc.richtext"
         case "txt", "md", "log", "rtf": return "doc.plaintext"
         case "mp3", "wav", "aiff", "aif", "m4a", "aac", "flac", "ogg", "oga", "wma", "opus", "alac", "caf", "au", "amr", "mid", "midi", "mp2", "mka", "ac3": return "waveform"

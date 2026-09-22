@@ -50,7 +50,7 @@ Set a folder cover: first image, custom picture, `.ico`, or a symbol. Crop or fi
 
 ![Folder image](Pics/folder-image.png)
 
-Settings: themes, folder covers, extra views, icon scale, sort and filter.
+Settings: grouped into Appearance, Folder Images, Explorer, Sidebar, and Playback.
 
 ![Settings](Pics/settings.png)
 
@@ -65,6 +65,7 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 ## What UnZip does
 
 - **File explorer** — default home screen. Sidebar, path bar, multiple views, sort, filter, search, preview
+- **Devices** — USB sticks, external disks, and network volumes in the sidebar, with Eject
 - **Path bar** — click folders, edit the path, **copy** it, or open **Terminal** in that folder
 - **Folder covers** — first picture in a folder becomes the icon; per-folder or global
 - **File actions** — copy, cut, paste, duplicate, move, rename, trash, drag-drop (Option = copy)

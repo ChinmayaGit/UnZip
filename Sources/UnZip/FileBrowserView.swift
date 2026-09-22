@@ -562,7 +562,8 @@ struct FileBrowserView: View {
     }
 
     private func selectOnPress(_ item: FileItem) {
-        if (NSApp.currentEvent?.clickCount ?? 1) >= 2 {
+        guard let event = NSApp.currentEvent, event.isMouseClick else { return }
+        if event.clickCount >= 2 {
             select(item, keepIfAlreadySelected: true)
             state.openFileItem(item)
             pressSelectID = item.id
@@ -570,7 +571,7 @@ struct FileBrowserView: View {
         }
         if pressSelectID == item.id { return }
         pressSelectID = item.id
-        if NSEvent.pressedMouseButtons == 2 || NSEvent.modifierFlags.contains(.control) {
+        if event.type == .rightMouseDown || event.modifierFlags.contains(.control) {
             select(item, keepIfAlreadySelected: true)
         } else {
             select(item)
@@ -825,6 +826,18 @@ private struct PressToSelect: ViewModifier {
                 .onChanged { _ in onPress() }
                 .onEnded { _ in onEnd() }
         )
+    }
+}
+
+private extension NSEvent {
+    var isMouseClick: Bool {
+        switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown,
+             .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            true
+        default:
+            false
+        }
     }
 }
 

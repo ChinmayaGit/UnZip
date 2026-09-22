@@ -127,6 +127,12 @@ struct UnZipApp: App {
                 Button("Downloads") {
                     state.showFiles(at: FileLocation.home.url.appendingPathComponent("Downloads"))
                 }
+                if !state.volumes.volumes.isEmpty {
+                    Divider()
+                    ForEach(state.volumes.volumes) { volume in
+                        Button(volume.name) { state.showFiles(at: volume.url) }
+                    }
+                }
                 Divider()
                 Button("Reveal in Finder") {
                     if let url = state.selectedDocument?.localURL {

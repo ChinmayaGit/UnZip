@@ -130,7 +130,7 @@ struct FileItem: Identifiable, Hashable, Sendable {
 enum FolderCover {
     static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "jpe", "jfif", "jif", "gif", "webp",
-        "heic", "heif", "tif", "tiff", "bmp", "dib", "ico", "icns",
+        "heic", "heif", "tif", "tiff", "bmp", "dib", "ico", "cur", "icns",
         "jp2", "j2k", "jpx", "jpf", "avif", "raw", "cr2", "cr3",
         "nef", "arw", "dng", "orf", "rw2", "raf", "pef", "srw",
         "3fr", "erf", "kdc", "mos", "mrw", "nrw", "x3f", "psd",
@@ -176,16 +176,22 @@ enum FolderCover {
     }
 
     nonisolated static func thumbnail(at url: URL, maxPixel: Int = 256) -> CGImage? {
-        if ["ico", "icns"].contains(url.pathExtension.lowercased()),
+        let ext = url.pathExtension.lowercased()
+        if ["ico", "cur"].contains(ext),
+           let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+           let image = IconFile.cgImage(from: data) {
+            return image
+        }
+        if ["ico", "icns", "cur"].contains(ext),
            let image = NSImage(contentsOf: url),
            let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             return cg
         }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
-            if let image = NSImage(contentsOf: url) {
-                return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            if let data = try? Data(contentsOf: url, options: .mappedIfSafe), let image = IconFile.cgImage(from: data) {
+                return image
             }
-            return nil
+            return NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
         }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -195,6 +201,9 @@ enum FolderCover {
             kCGImageSourceShouldCacheImmediately: true
         ]
         if let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            return image
+        }
+        if let data = try? Data(contentsOf: url, options: .mappedIfSafe), let image = IconFile.cgImage(from: data) {
             return image
         }
         return NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
