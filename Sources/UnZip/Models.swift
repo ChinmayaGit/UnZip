@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum ArchiveFormat: String, CaseIterable, Identifiable, Sendable {
@@ -127,24 +128,36 @@ struct ArchiveEntry: Identifiable, Hashable, Sendable {
     }()
 }
 
-enum BrowserLayout: String, CaseIterable, Identifiable {
-    case details, grid
+enum BrowserLayout: String, CaseIterable, Identifiable, Codable {
+    case details, list, grid, large, extraLarge, tiles, gallery
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .details: "Details"
+        case .list: "List"
         case .grid: "Grid"
+        case .large: "Large"
+        case .extraLarge: "XL"
+        case .tiles: "Tiles"
+        case .gallery: "Gallery"
         }
     }
 
     var systemImage: String {
         switch self {
         case .details: "list.bullet"
+        case .list: "list.dash"
         case .grid: "square.grid.2x2"
+        case .large: "square.grid.3x3"
+        case .extraLarge: "rectangle.grid.2x2"
+        case .tiles: "rectangle.split.2x1"
+        case .gallery: "rectangle.grid.1x2"
         }
     }
+
+    static let defaultVisible: [BrowserLayout] = [.details, .grid, .large]
 }
 
 enum EntrySort: String, CaseIterable, Identifiable {
@@ -165,18 +178,22 @@ enum EntrySort: String, CaseIterable, Identifiable {
 }
 
 enum FileAppearance {
+    static func icon(forFileNamed name: String) -> String {
+        switch URL(fileURLWithPath: name).pathExtension.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp", "icns", "ico": return "photo"
+        case "pdf": return "doc.richtext"
+        case "txt", "md", "log", "rtf": return "doc.plaintext"
+        case "mp3", "wav", "aiff", "aif", "m4a", "aac", "flac", "ogg", "oga", "wma", "opus", "alac", "caf", "au", "amr", "mid", "midi", "mp2", "mka", "ac3": return "waveform"
+        case "mp4", "mov", "m4v", "avi", "mkv", "webm", "wmv", "mpg", "mpeg", "m2v", "3gp", "flv", "ts", "m2ts", "vob", "ogv", "asf": return "film"
+        case "swift", "js", "tsx", "py", "json", "xml", "html", "css": return "chevron.left.forwardslash.chevron.right"
+        default: return "doc"
+        }
+    }
+
     static func icon(for entry: ArchiveEntry) -> String {
         if entry.isDirectory { return "folder.fill" }
         if entry.isNestedArchive { return ArchiveFormat.from(url: URL(fileURLWithPath: entry.name)).systemImage }
-        switch URL(fileURLWithPath: entry.name).pathExtension.lowercased() {
-        case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp", "icns": return "photo"
-        case "pdf": return "doc.richtext"
-        case "txt", "md", "log", "rtf": return "doc.plaintext"
-        case "mp3", "wav", "aiff", "m4a", "aac": return "waveform"
-        case "mp4", "mov", "m4v": return "film"
-        case "swift", "js", "ts", "py", "json", "xml", "html", "css": return "chevron.left.forwardslash.chevron.right"
-        default: return "doc"
-        }
+        return icon(forFileNamed: entry.name)
     }
 
     static func sort(_ a: ArchiveEntry, _ b: ArchiveEntry, by sort: EntrySort, ascending: Bool) -> Bool {
@@ -363,6 +380,32 @@ enum ByteFormat {
         formatter.allowedUnits = [.useKB, .useMB, .useGB, .useBytes]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
+    }
+}
+
+enum WindowChrome {
+    static let statusBarHeight: CGFloat = 34
+}
+
+enum ProtectedLocations {
+    static func contains(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        return reservedPaths.contains(path)
+    }
+
+    private static var reservedPaths: Set<String> {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let names = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Library", "Applications", "Public"]
+        var paths: [String] = [
+            "/",
+            "/Applications",
+            "/System",
+            "/Library",
+            "/Users",
+            home.path
+        ]
+        paths.append(contentsOf: names.map { home.appendingPathComponent($0).path })
+        return Set(paths)
     }
 }
 

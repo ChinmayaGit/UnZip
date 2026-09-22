@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -9,9 +10,10 @@ final class AppState: ObservableObject {
     @Published var selectedDocumentID: UUID?
     @Published var ftpSessions: [FTPSession] = []
     @Published var selectedFTPID: UUID?
+    @Published var fileBrowser = FileBrowser()
     @Published var bookmarks: [FTPBookmark] = []
     @Published var recents: [URL] = []
-    @Published var status: String = "Drop an archive or connect to a server."
+    @Published var status: String = "Browse files or drop an archive."
     @Published var progress: Double?
     @Published var busyMessage: String?
     @Published var alertMessage: String?
@@ -28,7 +30,17 @@ final class AppState: ObservableObject {
     @Published var ftpSort: EntrySort
     @Published var ftpSortAscending: Bool
     @Published var showPreviewPane: Bool
+    @Published var showSettings = false
+    @Published var folderImageTarget: FolderImageTarget?
+    @Published var fileDetails: FileDetailsTarget?
+    @Published var renameTarget: FileItem?
+    @Published var appearance = AppearancePreferences()
+    @Published var media = MediaPlayback()
+    @Published var gallery = ImageGallery()
+    @Published var share = FileShare()
+    @Published var showShareSheet = false
 
+    private var cancellables = Set<AnyCancellable>()
     private let defaults = UserDefaults.standard
     private let recentsKey = "unzip.recents"
     private let bookmarksKey = "unzip.bookmarks"
@@ -38,7 +50,7 @@ final class AppState: ObservableObject {
     private let previewKey = "unzip.showPreview"
 
     init() {
-        let savedLayout = BrowserLayout(rawValue: defaults.string(forKey: "unzip.layout") ?? "") ?? .details
+        let savedLayout = BrowserLayout(rawValue: defaults.string(forKey: "unzip.layout") ?? "") ?? .grid
         let savedSort = EntrySort(rawValue: defaults.string(forKey: "unzip.sort") ?? "") ?? .name
         let savedAscending = defaults.object(forKey: "unzip.sortAsc") as? Bool ?? true
         let savedPreview = defaults.object(forKey: "unzip.showPreview") as? Bool ?? true
@@ -56,6 +68,247 @@ final class AppState: ObservableObject {
            let saved = try? JSONDecoder().decode([FTPBookmark].self, from: data) {
             bookmarks = saved
         }
+        status = "\(fileBrowser.items.count) items · \(fileBrowser.currentURL.path)"
+        fileBrowser.reload(showHidden: appearance.showHidden)
+        fileBrowser.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        appearance.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        media.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        gallery.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        share.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        if !appearance.isLayoutEnabled(browserLayout) {
+            browserLayout = appearance.visibleLayouts[0]
+        }
+    }
+
+    func refreshCovers(for url: URL? = nil) {
+        if let url {
+            fileBrowser.covers.invalidate(url)
+        } else {
+            fileBrowser.covers.invalidateAll()
+        }
+        objectWillChange.send()
+    }
+
+    func refreshBrowser() {
+        fileBrowser.covers.invalidateAll()
+        fileBrowser.reload()
+        for item in fileBrowser.items {
+            fileBrowser.covers.request(item, appearance: appearance)
+        }
+        status = "Refreshed \(fileBrowser.currentURL.lastPathComponent)"
+    }
+
+    func pickCoverImage(for folder: URL) {
+        guard let path = appearance.importCoverImage() else { return }
+        var style = appearance.coverStyle(for: folder)
+        style.mode = .custom
+        style.imagePath = path
+        appearance.setCover(style, for: folder, applyGlobally: false)
+        refreshCovers(for: folder)
+        if let item = FileItem(url: folder, includeHidden: true) {
+            fileBrowser.covers.request(item, appearance: appearance)
+        }
+        status = "Updated folder image"
+    }
+
+    func beginShare(items: [FileItem]? = nil) {
+        share.start()
+        let selected = items ?? selectedFileItems()
+        let urls = selected.isEmpty ? [fileBrowser.currentURL] : selected.map(\.url)
+        share.publish(urls)
+        showShareSheet = true
+        status = share.status
+    }
+
+    func receiveFromPeer(_ peer: NearbyPeer) {
+        let folder = fileBrowser.currentURL
+        busyMessage = "Receiving from \(peer.name)…"
+        Task {
+            do {
+                let count = try await share.receive(from: peer, into: folder)
+                fileBrowser.reload()
+                busyMessage = nil
+                share.receiveNote = "Saved \(count) item\(count == 1 ? "" : "s") from \(peer.name)"
+                status = share.receiveNote ?? ""
+            } catch {
+                busyMessage = nil
+                alertMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func beginRename(_ item: FileItem? = nil) {
+        if let item {
+            renameTarget = item
+            return
+        }
+        renameTarget = selectedFileItems().first
+    }
+
+    func renameFileItem(_ item: FileItem, to rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != "." && name != "..", !name.contains("/") else {
+            alertMessage = "Enter a valid name."
+            return
+        }
+        let dest = item.url.deletingLastPathComponent().appendingPathComponent(name)
+        if dest.standardizedFileURL == item.url.standardizedFileURL {
+            renameTarget = nil
+            return
+        }
+        if FileManager.default.fileExists(atPath: dest.path) {
+            alertMessage = "“\(name)” already exists."
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: item.url, to: dest)
+            fileBrowser.reload()
+            fileBrowser.selectedIDs = [dest.standardizedFileURL.path]
+            fileBrowser.selectionAnchorID = dest.standardizedFileURL.path
+            renameTarget = nil
+            status = "Renamed to \(name)"
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    func playMedia(_ item: FileItem) {
+        playMedia(url: item.resolvedURL)
+    }
+
+    func playMedia(url: URL) {
+        preview = nil
+        let tracks: [URL]
+        if MediaKind.isVideo(url) {
+            tracks = fileBrowser.items.filter(\.isVideo).map(\.resolvedURL)
+        } else {
+            tracks = fileBrowser.items.filter(\.isAudio).map(\.resolvedURL)
+        }
+        media.play(url, queue: tracks)
+        if MediaKind.isVideo(url) {
+            setShowPreviewPane(true)
+        }
+        status = "Playing \(url.lastPathComponent)"
+    }
+
+    func openImageGallery(_ item: FileItem) {
+        let images = fileBrowser.items.filter(\.isImage).map(\.resolvedURL)
+        gallery.open(url: item.resolvedURL, folderImages: images)
+        status = item.resolvedURL.path
+    }
+
+    func goToPath(_ raw: String) {
+        let trimmed = (raw as NSString).expandingTildeInPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let url = URL(fileURLWithPath: trimmed)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            alertMessage = "That path doesn’t exist."
+            return
+        }
+        let folder = isDirectory.boolValue ? url : url.deletingLastPathComponent()
+        showFiles(at: folder)
+        if !isDirectory.boolValue, let item = fileBrowser.items.first(where: {
+            $0.url.standardizedFileURL == url.standardizedFileURL
+        }) {
+            fileBrowser.selectedIDs = [item.id]
+            previewFileSelection([item.id])
+        }
+        status = fileBrowser.currentURL.path
+    }
+
+    func copyCurrentPath() {
+        let path = fileBrowser.currentURL.path
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(path, forType: .string)
+        status = "Copied path"
+    }
+
+    func openTerminal(at url: URL? = nil) {
+        let folder = url ?? fileBrowser.currentURL
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Terminal", folder.path]
+        do {
+            try process.run()
+            status = "Opened Terminal in \(folder.lastPathComponent)"
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    func showDetails(for items: [FileItem]? = nil) {
+        let target = items ?? selectedFileItems()
+        if target.isEmpty {
+            if let folder = FileItem(url: fileBrowser.currentURL, includeHidden: true) {
+                fileDetails = FileDetailsTarget(items: [folder])
+            }
+            return
+        }
+        fileDetails = FileDetailsTarget(items: target)
+    }
+
+    func revealMediaPreview() {
+        if media.item == nil, let first = fileBrowser.items.first(where: \.isAudio) {
+            playMedia(first)
+        }
+        if !showPreviewPane {
+            setShowPreviewPane(true)
+        }
+    }
+
+    var isShowingFiles: Bool {
+        selectedDocumentID == nil && selectedFTPID == nil
+    }
+
+    var canGoBack: Bool {
+        if let document = selectedDocument { return document.canGoBack }
+        if selectedFTP != nil { return false }
+        return fileBrowser.canGoBack
+    }
+
+    var canGoForward: Bool {
+        if let document = selectedDocument { return document.canGoForward }
+        if selectedFTP != nil { return false }
+        return fileBrowser.canGoForward
+    }
+
+    var canGoUp: Bool {
+        if let document = selectedDocument { return document.canGoUp }
+        if let session = selectedFTP {
+            return session.currentPath != "/" && !session.currentPath.isEmpty
+        }
+        return fileBrowser.canGoUp
+    }
+
+    func showFiles(at url: URL? = nil) {
+        selectedDocumentID = nil
+        selectedFTPID = nil
+        preview = nil
+        if let url {
+            fileBrowser.navigate(to: url)
+        }
+        status = "\(fileBrowser.items.count) items · \(fileBrowser.currentURL.path)"
     }
 
     func setLayout(_ layout: BrowserLayout) {
@@ -256,13 +509,339 @@ final class AppState: ObservableObject {
     }
 
     func openSelected() {
-        guard let document = selectedDocument, let entry = document.selectedEntries.first else { return }
-        openEntry(entry)
+        if let document = selectedDocument, let entry = document.selectedEntries.first {
+            openEntry(entry)
+            return
+        }
+        if let session = selectedFTP, let item = session.items.first(where: { session.selectedIDs.contains($0.id) }) {
+            ftpOpen(item)
+            return
+        }
+        if let item = fileBrowser.selectedItems.first {
+            openFileItem(item)
+        }
     }
 
-    func goBack() { selectedDocument?.goBack() }
-    func goForward() { selectedDocument?.goForward() }
-    func goUp() { selectedDocument?.goUp() }
+    func goBack() {
+        if selectedDocument != nil {
+            selectedDocument?.goBack()
+            return
+        }
+        if selectedFTP != nil { return }
+        fileBrowser.goBack()
+        status = fileBrowser.currentURL.path
+    }
+
+    func goForward() {
+        if selectedDocument != nil {
+            selectedDocument?.goForward()
+            return
+        }
+        if selectedFTP != nil { return }
+        fileBrowser.goForward()
+        status = fileBrowser.currentURL.path
+    }
+
+    func goUp() {
+        if selectedDocument != nil {
+            selectedDocument?.goUp()
+            return
+        }
+        if selectedFTP != nil {
+            ftpUp()
+            return
+        }
+        fileBrowser.goUp()
+        status = fileBrowser.currentURL.path
+    }
+
+    func openFileItem(_ item: FileItem) {
+        let url = item.resolvedURL
+        var isDirectory = item.canEnter
+        if item.isAlias {
+            isDirectory = FormatDetector.isDirectory(url) && (try? url.resourceValues(forKeys: [.isPackageKey]).isPackage) != true
+        }
+        if isDirectory {
+            fileBrowser.navigate(to: url)
+            preview = nil
+            status = url.path
+            return
+        }
+        if FormatDetector.isUnzippable(url) {
+            open(url: url)
+            return
+        }
+        if item.isImage {
+            openImageGallery(item)
+            return
+        }
+        if MediaKind.isAudio(url) || MediaKind.isVideo(url) {
+            playMedia(item)
+            return
+        }
+        if showPreviewPane, isPreviewable(url) {
+            previewLocal(url)
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    func previewFileSelection(_ ids: Set<String>) {
+        guard isShowingFiles, showPreviewPane, ids.count == 1,
+              let item = fileBrowser.items.first(where: { $0.id == ids.first }),
+              !item.canEnter else {
+            if isShowingFiles { preview = nil }
+            return
+        }
+        if item.isAudio || item.isVideo {
+            playMedia(item)
+            return
+        }
+        previewLocal(item.resolvedURL)
+    }
+
+    func previewLocal(_ url: URL) {
+        if MediaKind.isAudio(url) || MediaKind.isVideo(url) {
+            playMedia(url: url)
+            return
+        }
+        busyMessage = "Loading preview…"
+        Task.detached { [weak self] in
+            do {
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
+                if values.isDirectory == true {
+                    await MainActor.run {
+                        self?.busyMessage = nil
+                        self?.preview = nil
+                    }
+                    return
+                }
+                let size = values.fileSize ?? 0
+                if size > 25_000_000 {
+                    await MainActor.run {
+                        self?.busyMessage = nil
+                        self?.preview = nil
+                        self?.status = "\(url.lastPathComponent) is too large to preview"
+                    }
+                    return
+                }
+                let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                let content = PreviewContent.make(name: url.lastPathComponent, data: data)
+                await MainActor.run {
+                    self?.preview = content
+                    self?.busyMessage = nil
+                    self?.status = url.path
+                }
+            } catch {
+                await MainActor.run {
+                    self?.busyMessage = nil
+                    self?.alertMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    @Published var fileClipboard: [URL] = []
+    @Published var fileClipboardCuts = false
+
+    func selectedFileItems() -> [FileItem] {
+        let selected = fileBrowser.selectedItems
+        return selected.isEmpty ? [] : selected
+    }
+
+    func copySelectedFiles() {
+        copyFileItems(selectedFileItems())
+    }
+
+    func cutSelectedFiles() {
+        cutFileItems(selectedFileItems())
+    }
+
+    func trashSelectedFiles() {
+        trashFileItems(selectedFileItems())
+    }
+
+    func selectAllFiles() {
+        fileBrowser.selectedIDs = Set(fileBrowser.items.map(\.id))
+    }
+
+    func copyFileItems(_ items: [FileItem]) {
+        let urls = items.map(\.url)
+        guard !urls.isEmpty else { return }
+        fileClipboard = urls
+        fileClipboardCuts = false
+        writePasteboard(urls)
+        status = urls.count == 1 ? "Copied \(urls[0].lastPathComponent)" : "Copied \(urls.count) items"
+    }
+
+    func cutFileItems(_ items: [FileItem]) {
+        let urls = items.map(\.url)
+        guard !urls.isEmpty else { return }
+        fileClipboard = urls
+        fileClipboardCuts = true
+        writePasteboard(urls)
+        status = urls.count == 1 ? "Cut \(urls[0].lastPathComponent)" : "Cut \(urls.count) items"
+    }
+
+    func pasteFiles(into folder: URL? = nil) {
+        let dest = folder ?? fileBrowser.currentURL
+        let urls: [URL]
+        if !fileClipboard.isEmpty {
+            urls = fileClipboard
+        } else {
+            urls = pasteboardURLs()
+        }
+        guard !urls.isEmpty else { return }
+        if fileClipboardCuts {
+            moveURLs(urls, into: dest)
+            fileClipboard = []
+            fileClipboardCuts = false
+        } else {
+            copyURLs(urls, into: dest)
+        }
+    }
+
+    func duplicateFileItems(_ items: [FileItem]) {
+        copyURLs(items.map(\.url), into: fileBrowser.currentURL)
+    }
+
+    func moveFileItems(_ items: [FileItem]) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.title = "Move To"
+        panel.prompt = "Move"
+        guard panel.runModal() == .OK, let dest = panel.url else { return }
+        moveURLs(items.map(\.url), into: dest)
+    }
+
+    func dropFiles(_ urls: [URL], into folder: URL) {
+        let incoming = fileBrowser.draggingURLs.isEmpty ? urls : fileBrowser.draggingURLs
+        fileBrowser.draggingURLs = []
+        guard !incoming.isEmpty else { return }
+        let unique = Array(Set(incoming.map { $0.standardizedFileURL }))
+        let archives = unique.filter { FormatDetector.isUnzippable($0) && !FormatDetector.isDirectory($0) }
+        let files = unique.filter { !archives.contains($0) }
+        if !files.isEmpty {
+            if NSEvent.modifierFlags.contains(.option) {
+                copyURLs(files, into: folder)
+            } else {
+                moveURLs(files, into: folder)
+            }
+        }
+        if !archives.isEmpty, files.isEmpty {
+            receiveDropped(archives)
+        }
+    }
+
+    func trashFileItems(_ items: [FileItem]) {
+        let current = fileBrowser.currentURL.standardizedFileURL
+        let blocked = items.filter { ProtectedLocations.contains($0.url) || $0.url.standardizedFileURL == current }
+        let allowed = items.filter { item in
+            !ProtectedLocations.contains(item.url) && item.url.standardizedFileURL != current
+        }
+        if !blocked.isEmpty, allowed.isEmpty {
+            let name = blocked[0].name
+            alertMessage = "“\(name)” is a special folder and can’t be moved to the Trash."
+            return
+        }
+        guard !allowed.isEmpty else { return }
+        let urls = allowed.map(\.url)
+        NSWorkspace.shared.recycle(urls) { [weak self] _, error in
+            Task { @MainActor in
+                guard let self else { return }
+                self.fileBrowser.reload()
+                self.fileBrowser.selectedIDs.subtract(allowed.map(\.id))
+                if let error {
+                    self.alertMessage = error.localizedDescription
+                } else {
+                    self.status = urls.count == 1
+                        ? "Moved \(urls[0].lastPathComponent) to Trash"
+                        : "Moved \(urls.count) items to Trash"
+                    if !blocked.isEmpty {
+                        self.status += " · skipped \(blocked.map(\.name).joined(separator: ", "))"
+                    }
+                }
+            }
+        }
+    }
+
+    private func copyURLs(_ urls: [URL], into folder: URL) {
+        do {
+            for url in urls {
+                let dest = uniqueURL(in: folder, name: url.lastPathComponent)
+                if url.standardizedFileURL == dest.standardizedFileURL { continue }
+                try FileManager.default.copyItem(at: url, to: dest)
+            }
+            fileBrowser.reload()
+            status = urls.count == 1
+                ? "Copied \(urls[0].lastPathComponent)"
+                : "Copied \(urls.count) items"
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func moveURLs(_ urls: [URL], into folder: URL) {
+        do {
+            for url in urls {
+                let dest = uniqueURL(in: folder, name: url.lastPathComponent)
+                if url.standardizedFileURL == dest.standardizedFileURL { continue }
+                if url.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL {
+                    continue
+                }
+                if dest.standardizedFileURL.path.hasPrefix(url.standardizedFileURL.path + "/") {
+                    throw UnZipError.failed("Cannot move a folder into itself.")
+                }
+                try FileManager.default.moveItem(at: url, to: dest)
+            }
+            fileBrowser.reload()
+            status = urls.count == 1
+                ? "Moved \(urls[0].lastPathComponent)"
+                : "Moved \(urls.count) items"
+        } catch {
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func uniqueURL(in folder: URL, name: String) -> URL {
+        var dest = folder.appendingPathComponent(name)
+        if !FileManager.default.fileExists(atPath: dest.path) { return dest }
+        let base = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: name).pathExtension
+        var index = 2
+        repeat {
+            let next = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
+            dest = folder.appendingPathComponent(next)
+            index += 1
+        } while FileManager.default.fileExists(atPath: dest.path)
+        return dest
+    }
+
+    private func writePasteboard(_ urls: [URL]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls as [NSURL])
+        pasteboard.setPropertyList(urls.map(\.path), forType: .init("NSFilenamesPboardType"))
+    }
+
+    private func pasteboardURLs() -> [URL] {
+        NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    private func isPreviewable(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        if FolderCover.isImage(url) { return true }
+        if MediaKind.isAudio(url) || MediaKind.isVideo(url) { return true }
+        if ext == "pdf" { return true }
+        let textExts: Set<String> = [
+            "txt", "md", "json", "xml", "plist", "swift", "js", "ts", "py", "rb", "sh",
+            "yml", "yaml", "css", "html", "csv", "log", "ini", "conf", "strings",
+            "c", "h", "m", "cpp", "rs", "go", "java", "kt"
+        ]
+        return textExts.contains(ext)
+    }
 
     func openEntry(_ entry: ArchiveEntry) {
         guard let document = selectedDocument else { return }

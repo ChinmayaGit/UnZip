@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @ViewState private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
         Group {
@@ -30,6 +30,9 @@ struct ContentView: View {
         }
         .toolbar { toolbar }
         .navigationTitle(title)
+        .preferredColorScheme(state.appearance.theme.colorScheme)
+        .tint(state.appearance.theme.accent)
+        .background(state.appearance.theme.windowBackground)
         .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
         .onDrop(of: [.fileURL], isTargeted: nil, perform: handleDrop)
         .alert("UnZip", isPresented: Binding(
@@ -55,12 +58,34 @@ struct ContentView: View {
         .sheet(item: $state.dropOffer) { offer in
             DropOfferSheet(offer: offer)
         }
+        .sheet(isPresented: $state.showSettings) {
+            SettingsView()
+        }
+        .sheet(item: $state.folderImageTarget) { target in
+            FolderImageSheet(target: target)
+        }
+        .sheet(item: $state.fileDetails) { target in
+            FileDetailsSheet(items: target.items)
+        }
+        .sheet(item: $state.renameTarget) { item in
+            RenameSheet(item: item)
+        }
+        .sheet(isPresented: $state.showShareSheet) {
+            ShareSheet(share: state.share)
+                .environmentObject(state)
+        }
+        .overlay {
+            if state.gallery.isPresented {
+                ImageGalleryView(gallery: state.gallery)
+                    .transition(.opacity)
+            }
+        }
     }
 
     private var title: String {
         if let document = state.selectedDocument { return document.title }
         if let session = state.selectedFTP { return session.bookmark.name }
-        return "UnZip"
+        return state.fileBrowser.currentURL.lastPathComponent
     }
 
     @ViewBuilder
@@ -70,7 +95,7 @@ struct ContentView: View {
         } else if let session = state.selectedFTP {
             FTPBrowserView(session: session)
         } else {
-            WelcomeView()
+            FileBrowserView(browser: state.fileBrowser, covers: state.fileBrowser.covers)
         }
     }
 
@@ -82,7 +107,7 @@ struct ContentView: View {
             } label: {
                 Label("Back", systemImage: "chevron.left")
             }
-            .disabled(!(state.selectedDocument?.canGoBack ?? false))
+            .disabled(!state.canGoBack)
             .help("Back")
 
             Button {
@@ -90,7 +115,7 @@ struct ContentView: View {
             } label: {
                 Label("Forward", systemImage: "chevron.right")
             }
-            .disabled(!(state.selectedDocument?.canGoForward ?? false))
+            .disabled(!state.canGoForward)
             .help("Forward")
 
             Button {
@@ -98,21 +123,51 @@ struct ContentView: View {
             } label: {
                 Label("Enclosing Folder", systemImage: "chevron.up")
             }
-            .disabled(!(state.selectedDocument?.canGoUp ?? false))
+            .disabled(!state.canGoUp)
             .help("Enclosing folder")
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                state.showFiles()
+            } label: {
+                Label("Files", systemImage: "internaldrive")
+            }
+            .help("Show the file manager")
+
             Picker("View", selection: Binding(
                 get: { state.browserLayout },
                 set: { state.setLayout($0) }
             )) {
-                ForEach(BrowserLayout.allCases) { layout in
+                ForEach(state.appearance.visibleLayouts) { layout in
                     Label(layout.title, systemImage: layout.systemImage).tag(layout)
                 }
             }
             .pickerStyle(.segmented)
-            .help("Details or grid view")
+            .help("Folder views")
+
+            Button {
+                state.showSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .help("Themes, folder images, views, and filters")
+
+            Button {
+                state.refreshBrowser()
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .help("Reload this folder and folder images")
+            .disabled(!state.isShowingFiles)
+
+            Button {
+                state.showDetails()
+            } label: {
+                Label("Details", systemImage: "info.circle")
+            }
+            .help("Show details for the selected item")
+            .disabled(!state.isShowingFiles)
 
             Button {
                 state.togglePreviewPane()
@@ -154,6 +209,13 @@ struct ContentView: View {
             .help("Open archive")
 
             Button {
+                state.beginShare()
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .help("Share files with a QR code or nearby UnZip")
+
+            Button {
                 state.showFTPSheet = true
             } label: {
                 Label("FTP", systemImage: "network")
@@ -193,20 +255,28 @@ struct ContentView: View {
                 ProgressView(value: progress)
                     .frame(width: 120)
             }
-            Text("Drag files to Desktop or any folder to extract")
+            Text(state.isShowingFiles ? "Double-click a folder to open it" : "Drag files to Desktop or any folder to extract")
                 .foregroundStyle(.tertiary)
             Text(state.capabilities)
                 .foregroundStyle(.tertiary)
         }
         .font(.caption)
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .frame(height: WindowChrome.statusBarHeight)
         .background(.bar)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        if state.isShowingFiles, !state.fileBrowser.draggingURLs.isEmpty {
+            state.dropFiles([], into: state.fileBrowser.currentURL)
+            return true
+        }
         DroppedFiles.urls(from: providers) { urls in
-            state.receiveDropped(urls)
+            if state.isShowingFiles {
+                state.dropFiles(urls, into: state.fileBrowser.currentURL)
+            } else {
+                state.receiveDropped(urls)
+            }
         }
         return !providers.isEmpty
     }
@@ -220,11 +290,21 @@ struct SidebarView: View {
             get: {
                 if let id = state.selectedDocumentID { return id.uuidString }
                 if let id = state.selectedFTPID { return id.uuidString }
-                return nil
+                if let favorite = FileLocation.favorites.first(where: {
+                    $0.url.standardizedFileURL == state.fileBrowser.currentURL.standardizedFileURL
+                }) {
+                    return "fav-\(favorite.id)"
+                }
+                return "files"
             },
             set: { value in
                 guard let value else { return }
-                if let doc = state.documents.first(where: { $0.id.uuidString == value }) {
+                if value == "files" {
+                    state.showFiles()
+                } else if value.hasPrefix("fav-"),
+                          let favorite = FileLocation.favorites.first(where: { "fav-\($0.id)" == value }) {
+                    state.showFiles(at: favorite.url)
+                } else if let doc = state.documents.first(where: { $0.id.uuidString == value }) {
                     state.selectedDocumentID = doc.id
                     state.selectedFTPID = nil
                 } else if let session = state.ftpSessions.first(where: { $0.id.uuidString == value }) {
@@ -233,6 +313,26 @@ struct SidebarView: View {
                 }
             }
         )) {
+            Section("Files") {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(state.fileBrowser.currentURL.lastPathComponent).lineLimit(1)
+                        Text(state.fileBrowser.currentURL.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } icon: {
+                    Image(systemName: "internaldrive")
+                }
+                .tag("files")
+
+                ForEach(FileLocation.favorites) { location in
+                    Label(location.title, systemImage: location.systemImage)
+                        .tag("fav-\(location.id)")
+                }
+            }
+
             if !state.documents.isEmpty {
                 Section("Archives") {
                     ForEach(state.documents) { document in
@@ -327,106 +427,6 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-    }
-}
-
-struct WelcomeView: View {
-    @EnvironmentObject private var state: AppState
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(spacing: 28) {
-            Spacer()
-            ZStack {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .frame(width: 88, height: 88)
-                Image(systemName: "doc.zipper")
-                    .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(.primary)
-            }
-            VStack(spacing: 8) {
-                Text("UnZip")
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
-                Text("Drop an archive to open it, or drop a folder or file to zip it.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 420)
-                Text("ZIP, RAR, ISO, TAR, 7Z, DMG — and any folder or file you want to compress.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 420)
-            }
-
-            VStack(spacing: 10) {
-                dropZone
-                HStack(spacing: 10) {
-                    Button("Open Archive…") { state.openPanel() }
-                        .keyboardShortcut("o", modifiers: .command)
-                    Button("Connect FTP…") { state.showFTPSheet = true }
-                    Button("Create ZIP…") { state.showCreateSheet = true }
-                }
-                .controlSize(.large)
-            }
-
-            HStack(spacing: 18) {
-                capability("ZIP / JAR / APK", "doc.zipper")
-                capability("RAR / 7Z", "shippingbox")
-                capability("ISO / DMG", "opticaldisc")
-                capability("FTP / SFTP", "network")
-            }
-            .padding(.top, 8)
-
-            Text("In Finder, right-click a folder or file → Services → Zip with UnZip")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            if !Toolchain.rarReady {
-                Text("For RAR and 7Z extraction, install extra tools: brew install unar p7zip")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var dropZone: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [6, 5]))
-            .foregroundStyle(hovering ? Color.accentColor : Color.secondary.opacity(0.35))
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(hovering ? Color.accentColor.opacity(0.06) : Color.clear)
-            )
-            .frame(width: 420, height: 110)
-            .overlay {
-                VStack(spacing: 6) {
-                    Text(hovering ? "Release to open or zip" : "Drop archives or folders")
-                        .font(.headline)
-                    Text("Archives open · folders and files can be zipped")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .onDrop(of: [.fileURL], isTargeted: $hovering) { providers in
-                DroppedFiles.urls(from: providers) { urls in
-                    state.receiveDropped(urls)
-                }
-                return true
-            }
-    }
-
-    private func capability(_ title: String, _ icon: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.title3)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 90)
     }
 }
 
@@ -602,7 +602,7 @@ struct ArchiveBrowserView: View {
                 }
             }
             .pickerStyle(.menu)
-            .frame(width: 92)
+            .frame(minWidth: 140)
             Button {
                 state.toggleSortDirection()
             } label: {
@@ -809,7 +809,39 @@ struct PreviewPane: View {
 
     var body: some View {
         Group {
-            if let preview = state.preview {
+            if let media = state.media.item, media.isVideo {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            state.setShowPreviewPane(false)
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Hide preview")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                    VideoPlayerPane(playback: state.media)
+                }
+            } else if state.media.item != nil {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            state.setShowPreviewPane(false)
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Hide preview")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    MusicPlayerPane(playback: state.media)
+                }
+            } else if let preview = state.preview {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text(preview.name)
@@ -847,12 +879,29 @@ struct PreviewPane: View {
                                 .padding(12)
                         }
                     case .image:
-                        if let image = preview.image {
-                            Image(nsImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .padding(16)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        VStack(spacing: 8) {
+                            if let image = preview.image {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .padding(16)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if let item = state.fileBrowser.selectedItems.first, item.isImage {
+                                            state.openImageGallery(item)
+                                        }
+                                    }
+                            }
+                            if let item = state.fileBrowser.selectedItems.first, item.isImage {
+                                Button {
+                                    state.openImageGallery(item)
+                                } label: {
+                                    Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                                }
+                                .buttonStyle(.borderless)
+                                .padding(.bottom, 8)
+                            }
                         }
                     case .pdf:
                         PDFPreview(data: preview.data)

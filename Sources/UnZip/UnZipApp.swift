@@ -20,6 +20,7 @@ struct UnZipApp: App {
                     NSApp.servicesProvider = appDelegate
                     NSUpdateDynamicServices()
                     appDelegate.flushPending()
+                    state.share.start()
                 }
                 .onOpenURL { url in
                     state.receiveDropped([url])
@@ -35,21 +36,64 @@ struct UnZipApp: App {
                     .keyboardShortcut("k", modifiers: .command)
                 Button("Create ZIP…") { state.showCreateSheet = true }
                     .keyboardShortcut("n", modifiers: .command)
+                Button("Share…") { state.beginShare() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
                 Button("Extract…") { state.extractSelected() }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(state.selectedDocument == nil)
+            }
+            CommandGroup(replacing: .pasteboard) {
+                Button("Copy") { state.copySelectedFiles() }
+                    .keyboardShortcut("c", modifiers: .command)
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
+                Button("Cut") { state.cutSelectedFiles() }
+                    .keyboardShortcut("x", modifiers: .command)
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
+                Button("Paste") { state.pasteFiles() }
+                    .keyboardShortcut("v", modifiers: .command)
+                    .disabled(!state.isShowingFiles)
+                Button("Duplicate") { state.duplicateFileItems(state.selectedFileItems()) }
+                    .keyboardShortcut("d", modifiers: .command)
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
+                Button("Move To…") { state.moveFileItems(state.selectedFileItems()) }
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
+                Button("Select All") { state.selectAllFiles() }
+                    .keyboardShortcut("a", modifiers: .command)
+                    .disabled(!state.isShowingFiles)
+                Button("Details") { state.showDetails() }
+                    .keyboardShortcut("i", modifiers: .command)
+                    .disabled(!state.isShowingFiles)
+                Button("Rename") { state.beginRename() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
+                Button("Refresh") { state.refreshBrowser() }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(!state.isShowingFiles)
+                Divider()
+                Button("Move to Trash") { state.trashSelectedFiles() }
+                    .keyboardShortcut(.delete)
+                    .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
             }
             CommandMenu("View") {
                 Button("as Details") { state.setLayout(.details) }
                     .keyboardShortcut("2", modifiers: .command)
                 Button("as Grid") { state.setLayout(.grid) }
                     .keyboardShortcut("1", modifiers: .command)
+                Button("as Large") { state.setLayout(.large) }
+                    .keyboardShortcut("3", modifiers: .command)
+                Button("as List") { state.setLayout(.list) }
+                Button("as Extra Large") { state.setLayout(.extraLarge) }
+                Button("as Tiles") { state.setLayout(.tiles) }
+                Button("as Gallery") { state.setLayout(.gallery) }
                 Divider()
                 Button(state.showPreviewPane ? "Hide Preview" : "Show Preview") {
                     state.togglePreviewPane()
                 }
                 .keyboardShortcut("p", modifiers: [.command, .option])
+                Divider()
+                Button("Settings…") { state.showSettings = true }
+                    .keyboardShortcut(",", modifiers: .command)
                 Divider()
                 Button("Sort by Name") { state.setSort(.name) }
                 Button("Sort by Date") { state.setSort(.date) }
@@ -59,17 +103,32 @@ struct UnZipApp: App {
             CommandMenu("Go") {
                 Button("Back") { state.goBack() }
                     .keyboardShortcut("[", modifiers: .command)
-                    .disabled(!(state.selectedDocument?.canGoBack ?? false))
+                    .disabled(!state.canGoBack)
                 Button("Forward") { state.goForward() }
                     .keyboardShortcut("]", modifiers: .command)
-                    .disabled(!(state.selectedDocument?.canGoForward ?? false))
+                    .disabled(!state.canGoForward)
                 Button("Enclosing Folder") { state.goUp() }
                     .keyboardShortcut(.upArrow, modifiers: .command)
-                    .disabled(!(state.selectedDocument?.canGoUp ?? false))
+                    .disabled(!state.canGoUp)
                 Divider()
-                Button("Reveal Archive in Finder") {
+                Button("File Manager") { state.showFiles() }
+                    .keyboardShortcut("1", modifiers: [.command, .option])
+                Button("Home") { state.showFiles(at: FileLocation.home.url) }
+                Button("Desktop") {
+                    state.showFiles(at: FileLocation.home.url.appendingPathComponent("Desktop"))
+                }
+                Button("Documents") {
+                    state.showFiles(at: FileLocation.home.url.appendingPathComponent("Documents"))
+                }
+                Button("Downloads") {
+                    state.showFiles(at: FileLocation.home.url.appendingPathComponent("Downloads"))
+                }
+                Divider()
+                Button("Reveal in Finder") {
                     if let url = state.selectedDocument?.localURL {
                         ArchiveEngine.reveal(url)
+                    } else {
+                        ArchiveEngine.reveal(state.fileBrowser.currentURL)
                     }
                 }
             }

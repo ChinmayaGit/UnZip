@@ -6,14 +6,14 @@ struct FTPConnectSheet: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var kind: FTPBookmark.Kind = .ftp
-    @State private var name = ""
-    @State private var host = ""
-    @State private var port = "21"
-    @State private var username = ""
-    @State private var password = ""
-    @State private var path = "/"
-    @State private var selectedBookmark: FTPBookmark?
+    @ViewState private var kind: FTPBookmark.Kind = .ftp
+    @ViewState private var name = ""
+    @ViewState private var host = ""
+    @ViewState private var port = "21"
+    @ViewState private var username = ""
+    @ViewState private var password = ""
+    @ViewState private var path = "/"
+    @ViewState private var selectedBookmark: FTPBookmark?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -126,8 +126,8 @@ struct FTPConnectSheet: View {
 struct CreateArchiveSheet: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var sources: [URL] = []
-    @State private var options = CompressOptions()
+    @ViewState private var sources: [URL] = []
+    @ViewState private var options = CompressOptions()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -229,7 +229,7 @@ struct CompressSheet: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.dismiss) private var dismiss
     var job: CompressJob
-    @State private var options = CompressOptions()
+    @ViewState private var options = CompressOptions()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -423,7 +423,7 @@ struct PasswordSheet: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.dismiss) private var dismiss
     var url: URL
-    @State private var password = ""
+    @ViewState private var password = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {

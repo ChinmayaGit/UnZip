@@ -147,6 +147,14 @@
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>UnZip uses the local network to share files with nearby devices and show a download page if they don’t have the app.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_unzip-share._tcp</string>
+	</array>
 </dict>
 </plist>
