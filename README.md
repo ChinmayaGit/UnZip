@@ -12,9 +12,9 @@ Full walkthrough: **[How to use](HowToUse.md)** — every feature, what it is fo
 
 Get the latest build from **[Releases](https://github.com/ChinmayaGit/UnZip/releases/latest)**. Use any one file:
 
-- `UnZip-1.1.0.dmg` — drag the app into Applications
-- `UnZip-1.1.0.pkg` — double-click to install
-- `UnZip-1.1.0-macos.zip` — unpack and move `UnZip.app` into Applications
+- `UnZip-1.2.0.dmg` — drag the app into Applications
+- `UnZip-1.2.0.pkg` — double-click to install
+- `UnZip-1.2.0-macos.zip` — unpack and move `UnZip.app` into Applications
 
 No sign-in. No license agreement.
 
@@ -65,12 +65,13 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 ## What UnZip does
 
 - **File explorer** — default home screen. Sidebar, path bar, multiple views, sort, filter, search, preview
+- **Sidebar** — Favorites, Devices, Archives, Servers, Recent. Close an archive, server, or recent item with **X**. Recent has **Clear All**. Turn sections on or off in Settings
 - **Devices** — USB sticks, external disks, and network volumes in the sidebar, with Eject
 - **Path bar** — click folders, edit the path, **copy** it, or open **Terminal** in that folder
 - **Folder covers** — first picture in a folder becomes the icon; per-folder or global
 - **File actions** — copy, cut, paste, duplicate, move, rename, trash, drag-drop (Option = copy)
 - **Open With** — pick VLC, QuickTime, Preview, or any other app; **Set as Default** for that file type
-- **Images** — fullscreen viewer; left / right through the folder
+- **Images** — fullscreen viewer; left / right through the folder. ffmpeg `.ico` files show in UnZip even when Finder cannot
 - **Music** — play/pause, next, seek, volume, shuffle, auto-next, loop, album art
 - **Video** — play/pause, volume, fullscreen; VP9 picture is prepared through VLC if installed
 - **Archives** — ZIP, RAR, 7Z, TAR, ISO, DMG, and more; extract and create
@@ -82,14 +83,14 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 
 ### Disk image (`.dmg`)
 
-1. Double-click `UnZip-1.1.0.dmg`.
+1. Double-click `UnZip-1.2.0.dmg`.
 2. Drag **UnZip** into the **Applications** folder.
 3. Open UnZip from Applications or Spotlight.
 4. If macOS says the app cannot be opened, Control-click UnZip, choose **Open**, then click **Open** again.
 
 ### Installer package (`.pkg`)
 
-1. Double-click `UnZip-1.1.0.pkg`.
+1. Double-click `UnZip-1.2.0.pkg`.
 2. Follow the steps and click **Install**. There is no license to accept.
 3. UnZip is copied to `/Applications`.
 4. Open UnZip from Applications or Spotlight.
@@ -97,7 +98,7 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 
 ### Zip archive (`.zip`)
 
-1. Double-click `UnZip-1.1.0-macos.zip` to unpack it.
+1. Double-click `UnZip-1.2.0-macos.zip` to unpack it.
 2. Move `UnZip.app` into the **Applications** folder.
 3. Open UnZip from Applications or Spotlight.
 4. If macOS says the app cannot be opened, Control-click UnZip, choose **Open**, then click **Open** again.
@@ -122,7 +123,7 @@ From this project:
 ./scripts/package.sh
 ```
 
-That writes `UnZip-1.1.0.dmg`, `UnZip-1.1.0.pkg`, and `UnZip-1.1.0-macos.zip` into `dist/`.
+That writes `UnZip-1.2.0.dmg`, `UnZip-1.2.0.pkg`, and `UnZip-1.2.0-macos.zip` into `dist/`.
 
 For a local copy only:
 

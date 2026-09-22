@@ -26,6 +26,22 @@ Toolbar back / forward / up work like a browser.
 
 ---
 
+## Sidebar
+
+**What it is for:** Jump to folders, drives, open archives, servers, and recent files.
+
+| Section | What it does |
+| --- | --- |
+| Files | Current folder plus Favorites (Home, Desktop, Downloads…) |
+| Devices | USB sticks, external disks, and network volumes. Right-click **Eject** |
+| Archives | Open archives. **X** on a row closes that archive |
+| Servers | FTP / FTPS / SFTP. **X** disconnects or removes a saved server |
+| Recent | Last opened archives. **X** removes one. **Clear All** empties the list |
+
+Show or hide any of these in **Settings → Sidebar**.
+
+---
+
 ## Path bar (copy path + Terminal)
 
 **What it is for:** See where you are, jump folders, copy the path, or open a shell in that folder.
@@ -109,6 +125,8 @@ Toggle it with **Option-Command-P** or the preview button in the toolbar.
 2. Double-click one, or use **View Image** / **Full Screen** in preview.
 3. **Left** and **Right** go to the previous / next image in that folder.
 4. **Esc** closes. There is also a fullscreen button.
+
+UnZip also shows `.ico` files that ffmpeg made, which Finder often cannot preview.
 
 ---
 
