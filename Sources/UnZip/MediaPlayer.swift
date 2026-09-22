@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import AVKit
 import Combine
+import Darwin
 import SwiftUI
 
 enum RepeatMode: String, CaseIterable, Identifiable {
@@ -73,6 +74,7 @@ final class MediaPlayback: ObservableObject {
 
     init() {
         player.volume = volume
+        player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
             queue: .main
@@ -236,12 +238,10 @@ final class MediaPlayback: ObservableObject {
         player.replaceCurrentItem(with: playerItem)
         observeEnd(of: playerItem)
         loadMetadata(for: url)
+        player.play()
+        isPlaying = true
         if media.isVideo {
-            isPlaying = false
             videoFallbackTask = Task { await startVideo(url, item: playerItem) }
-        } else {
-            player.play()
-            isPlaying = true
         }
     }
 
@@ -258,41 +258,39 @@ final class MediaPlayback: ObservableObject {
     }
 
     private func startVideo(_ url: URL, item playerItem: AVPlayerItem) async {
-        let asset = playerItem.asset
-        let tracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
-        let playable = await videoTrackIsPlayable(tracks.first)
-        guard !Task.isCancelled else { return }
-        if playable {
-            player.play()
-            isPlaying = true
+        if let cached = cachedTranscode(for: url) {
+            guard !Task.isCancelled else { return }
+            playExternal(cached, note: nil)
             return
         }
-        playbackNote = "Preparing video…"
-        if let playable = await preparedVideoURL(for: url) {
+        let tracks = (try? await playerItem.asset.loadTracks(withMediaType: .video)) ?? []
+        let playable = await videoTrackIsPlayable(tracks.first)
+        guard !Task.isCancelled else { return }
+        if playable { return }
+        playbackNote = "Buffering video…"
+        if let stream = await startVLCStream(for: url) {
             guard !Task.isCancelled else { return }
-            clearEndObserver()
-            let streamed = AVPlayerItem(url: playable)
-            player.replaceCurrentItem(with: streamed)
-            observeEnd(of: streamed)
-            player.play()
-            isPlaying = true
-            playbackNote = nil
+            playExternal(stream, note: nil)
         } else {
-            player.play()
-            isPlaying = true
             playbackNote = "This video uses VP9, which macOS can’t decode. Open it in VLC for the picture."
             openInVLC(url)
         }
     }
 
+    private func playExternal(_ url: URL, note: String?) {
+        clearEndObserver()
+        let next = AVPlayerItem(url: url)
+        next.preferredForwardBufferDuration = 4
+        player.replaceCurrentItem(with: next)
+        observeEnd(of: next)
+        player.play()
+        isPlaying = true
+        playbackNote = note
+    }
+
     private func videoTrackIsPlayable(_ track: AVAssetTrack?) async -> Bool {
         guard let track else { return false }
         return (try? await track.load(.isPlayable)) ?? false
-    }
-
-    private func preparedVideoURL(for url: URL) async -> URL? {
-        if let cached = cachedTranscode(for: url) { return cached }
-        return await transcodeWithVLC(url)
     }
 
     private func cachedTranscode(for url: URL) -> URL? {
@@ -307,25 +305,33 @@ final class MediaPlayback: ObservableObject {
             .appendingPathComponent("UnZip/video", isDirectory: true)
             ?? FileManager.default.temporaryDirectory
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var hash: UInt64 = 5381
+        for byte in url.standardizedFileURL.path.utf8 {
+            hash = ((hash << 5) &+ hash) &+ UInt64(byte)
+        }
         let stamp = Int((try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0)
-        return folder.appendingPathComponent("\(url.path.hashValue)-\(stamp).mp4")
+        return folder.appendingPathComponent("\(hash)-\(stamp).ts")
     }
 
-    private func transcodeWithVLC(_ url: URL) async -> URL? {
+    private func startVLCStream(for url: URL) async -> URL? {
         let vlc = URL(fileURLWithPath: "/Applications/VLC.app/Contents/MacOS/VLC")
         guard FileManager.default.isExecutableFile(atPath: vlc.path) else { return nil }
-        let dest = transcodeCacheURL(for: url)
-        try? FileManager.default.removeItem(at: dest)
+        let port = unusedPort()
+        let cache = transcodeCacheURL(for: url)
+        try? FileManager.default.removeItem(at: cache)
         let process = Process()
         process.executableURL = vlc
         process.arguments = [
             "-I", "dummy",
             "--no-media-library",
             "--no-osd",
-            "--play-and-exit",
+            "--network-caching=300",
+            "--live-caching=300",
             url.path,
             "--sout",
-            "#transcode{vcodec=h264,vb=4000,width=1280,acodec=mp4a,ab=128,channels=2,samplerate=44100}:standard{access=file,mux=mp4,dst=\(dest.path)}"
+            "#transcode{vcodec=h264,venc=videotoolbox,vb=2500,width=1280,fps=30,acodec=mp4a,ab=128,channels=2,samplerate=44100}:duplicate{dst=standard{access=http,mux=ts,dst=127.0.0.1:\(port)/},dst=standard{access=file,mux=ts,dst=\(cache.path)}}",
+            "--sout-all",
+            "--sout-keep"
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -335,16 +341,58 @@ final class MediaPlayback: ObservableObject {
             return nil
         }
         vlcProcess = process
-        while process.isRunning {
+        for _ in 0..<25 {
             if Task.isCancelled {
                 stopVLC()
                 return nil
             }
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            if tcpOpen(port: port) {
+                return URL(string: "http://127.0.0.1:\(port)/")
+            }
+            try? await Task.sleep(nanoseconds: 120_000_000)
         }
-        vlcProcess = nil
-        let size = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        return size > 10_000 ? dest : nil
+        return URL(string: "http://127.0.0.1:\(port)/")
+    }
+
+    private func unusedPort() -> Int {
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        addr.sin_port = 0
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        guard sock >= 0 else { return Int.random(in: 18000...18999) }
+        defer { close(sock) }
+        _ = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(sock, $0, &length)
+            }
+        }
+        let port = Int(UInt16(bigEndian: addr.sin_port))
+        return port == 0 ? Int.random(in: 18000...18999) : port
+    }
+
+    private func tcpOpen(port: Int) -> Bool {
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        guard sock >= 0 else { return false }
+        defer { close(sock) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let result = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return result == 0
     }
 
     private func openInVLC(_ url: URL) {
