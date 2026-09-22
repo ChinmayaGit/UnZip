@@ -14,6 +14,14 @@ struct ShareFile: Identifiable, Hashable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, name, size
     }
+
+    var previewKind: String {
+        let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
+        if FolderCover.imageExtensions.contains(ext) { return "image" }
+        if MediaKind.isVideo(URL(fileURLWithPath: name)) { return "video" }
+        if MediaKind.isAudio(URL(fileURLWithPath: name)) { return "audio" }
+        return "file"
+    }
 }
 
 struct NearbyPeer: Identifiable, Hashable {
@@ -252,10 +260,16 @@ final class FileShare: ObservableObject {
             sendJSON(files, on: connection)
             return
         }
-        if path.hasPrefix("/d/") {
+        if path.hasPrefix("/d/") || path.hasPrefix("/p/") {
             let id = String(path.dropFirst(3))
             if let file = fileMap[id], let url = file.url, FileManager.default.fileExists(atPath: url.path) {
-                sendFile(url, name: URL(fileURLWithPath: file.name).lastPathComponent, on: connection)
+                sendFile(
+                    url,
+                    name: URL(fileURLWithPath: file.name).lastPathComponent,
+                    inline: path.hasPrefix("/p/"),
+                    requestHeader: header,
+                    on: connection
+                )
                 return
             }
             send(on: connection, status: 404, type: "text/plain", body: Data("Missing".utf8))
@@ -283,26 +297,45 @@ final class FileShare: ObservableObject {
         })
     }
 
-    private func sendFile(_ url: URL, name: String, on connection: NWConnection) {
+    private func sendFile(_ url: URL, name: String, inline: Bool, requestHeader: String, on connection: NWConnection) {
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             send(on: connection, status: 404, type: "text/plain", body: Data("Missing".utf8))
             return
         }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let escaped = name.replacingOccurrences(of: "\"", with: "")
-        var header = "HTTP/1.1 200 OK\r\n"
-        header += "Content-Type: application/octet-stream\r\n"
-        header += "Content-Disposition: attachment; filename=\"\(escaped)\"\r\n"
-        header += "Content-Length: \(size)\r\n"
+        let type = Self.mimeType(for: name)
+        let range = Self.byteRange(from: requestHeader, size: size)
+        let start = range?.0 ?? 0
+        let end = range?.1 ?? max(size - 1, 0)
+        let length = size == 0 ? 0 : (end - start + 1)
+        if start > 0 {
+            try? handle.seek(toOffset: UInt64(start))
+        }
+        var header = range == nil ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 206 Partial Content\r\n"
+        header += "Content-Type: \(type)\r\n"
+        header += "Content-Disposition: \(inline ? "inline" : "attachment"); filename=\"\(escaped)\"\r\n"
+        header += "Accept-Ranges: bytes\r\n"
+        if range != nil {
+            header += "Content-Range: bytes \(start)-\(end)/\(size)\r\n"
+        }
+        header += "Content-Length: \(length)\r\n"
         header += "Access-Control-Allow-Origin: *\r\n"
         header += "Connection: close\r\n\r\n"
         connection.send(content: Data(header.utf8), completion: .contentProcessed { _ in
-            Self.stream(handle, on: connection)
+            Self.stream(handle, remaining: length, on: connection)
         })
     }
 
-    private static func stream(_ handle: FileHandle, on connection: NWConnection) {
-        let chunk = handle.readData(ofLength: 64 * 1024)
+    nonisolated private static func stream(_ handle: FileHandle, remaining: Int, on connection: NWConnection) {
+        if remaining <= 0 {
+            try? handle.close()
+            connection.send(content: nil, isComplete: true, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+            return
+        }
+        let chunk = handle.readData(ofLength: min(64 * 1024, remaining))
         if chunk.isEmpty {
             try? handle.close()
             connection.send(content: nil, isComplete: true, completion: .contentProcessed { _ in
@@ -316,42 +349,129 @@ final class FileShare: ObservableObject {
                 connection.cancel()
                 return
             }
-            stream(handle, on: connection)
+            stream(handle, remaining: remaining - chunk.count, on: connection)
         })
     }
 
     private func webPage() -> String {
-        let items = files.map { file in
-            let safe = Self.escape(file.name)
-            return """
-            <a class="file" href="/d/\(file.id)"><strong>\(safe)</strong><span>\(ByteFormat.string(file.size))</span></a>
-            """
-        }.joined()
-        let list = items.isEmpty
-            ? "<p class=\"empty\">This Mac is online with UnZip. Ask them to tap Share on the files they want to send.</p>"
-            : items
+        let images = files.filter { $0.previewKind == "image" }
+        let videos = files.filter { $0.previewKind == "video" }
+        let songs = files.filter { $0.previewKind == "audio" }
+        let others = files.filter { $0.previewKind == "file" }
+        var sections: [String] = []
+        if !videos.isEmpty {
+            sections.append("<h2>Videos</h2><div class=\"media\">" + videos.map { file in
+                let safe = Self.escape(file.name)
+                return """
+                <article class="tile">
+                  <video controls preload="metadata" src="/p/\(file.id)" playsinline></video>
+                  <div class="meta"><strong>\(safe)</strong><a href="/d/\(file.id)">Download</a></div>
+                </article>
+                """
+            }.joined() + "</div>")
+        }
+        if !images.isEmpty {
+            sections.append("<h2>Photos</h2><div class=\"grid\">" + images.map { file in
+                let safe = Self.escape(file.name)
+                return """
+                <a class="shot" href="/p/\(file.id)" target="_blank" title="\(safe)">
+                  <img src="/p/\(file.id)" alt="\(safe)" loading="lazy">
+                  <span>\(safe)</span>
+                </a>
+                """
+            }.joined() + "</div>")
+        }
+        if !songs.isEmpty {
+            sections.append("<h2>Music</h2><div class=\"media\">" + songs.map { file in
+                let safe = Self.escape(file.name)
+                return """
+                <article class="tile audio">
+                  <div class="meta"><strong>\(safe)</strong><a href="/d/\(file.id)">Download</a></div>
+                  <audio controls preload="metadata" src="/p/\(file.id)"></audio>
+                </article>
+                """
+            }.joined() + "</div>")
+        }
+        if !others.isEmpty || files.isEmpty {
+            let rows = others.map { file in
+                let safe = Self.escape(file.name)
+                return "<a class=\"file\" href=\"/d/\(file.id)\"><strong>\(safe)</strong><span>\(ByteFormat.string(file.size))</span></a>"
+            }.joined()
+            let body = rows.isEmpty
+                ? "<p class=\"empty\">This Mac is online with UnZip. Ask them to tap Share on the files they want to send.</p>"
+                : rows
+            sections.append("<h2>Files</h2><div class=\"card\">\(body)</div>")
+        }
         return """
         <!doctype html>
         <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>UnZip Share</title>
         <style>
         body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;background:#0f1115;color:#f2f4f8}
-        main{max-width:560px;margin:0 auto;padding:28px 20px 48px}
+        main{max-width:880px;margin:0 auto;padding:28px 20px 56px}
         h1{font-size:28px;margin:0 0 6px}
-        .sub{color:#9aa3b2;margin:0 0 22px}
-        .card{background:#1a1f27;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
+        h2{font-size:18px;margin:28px 0 12px}
+        .sub{color:#9aa3b2;margin:0 0 10px}
+        .card,.media{display:flex;flex-direction:column;gap:12px}
+        .card{background:#1a1f27;border-radius:16px;padding:16px}
         .file{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:12px;background:#262c36;color:#fff;text-decoration:none}
-        .file span{color:#9aa3b2}
-        .empty{color:#9aa3b2}
+        .file span,.empty{color:#9aa3b2}
+        .tile{background:#1a1f27;border-radius:16px;overflow:hidden}
+        .tile video{width:100%;max-height:70vh;background:#000;display:block}
+        .tile audio{width:calc(100% - 24px);margin:0 12px 12px}
+        .meta{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;align-items:center}
+        .meta a{color:#7cb8ff;text-decoration:none}
+        .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+        .shot{display:block;background:#1a1f27;border-radius:14px;overflow:hidden;color:#fff;text-decoration:none}
+        .shot img{width:100%;height:150px;object-fit:cover;background:#111;display:block}
+        .shot span{display:block;padding:8px 10px;font-size:12px;color:#c5cdd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .hint{margin-top:22px;color:#9aa3b2;font-size:14px;line-height:1.45}
         </style></head>
         <body><main>
         <h1>UnZip Share</h1>
-        <p class="sub">From \(Self.escape(deviceName))</p>
-        <div class="card">\(list)</div>
-        <p class="hint">You don’t need the UnZip app to download. Tap a file to save it. If you want nearby-device sharing next time, install UnZip on this device.</p>
+        <p class="sub">From \(Self.escape(deviceName)) — play photos, videos, and music here, or download them.</p>
+        \(sections.joined())
+        <p class="hint">You don’t need the UnZip app. Play media in this page, or download a file. For nearby sharing next time, install UnZip on this device.</p>
         </main></body></html>
         """
+    }
+
+    static func mimeType(for name: String) -> String {
+        switch URL(fileURLWithPath: name).pathExtension.lowercased() {
+        case "png": return "image/png"
+        case "jpg", "jpeg", "jpe", "jfif": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "bmp", "dib": return "image/bmp"
+        case "svg": return "image/svg+xml"
+        case "heic", "heif": return "image/heic"
+        case "mp4", "m4v", "m4p": return "video/mp4"
+        case "mov", "qt": return "video/quicktime"
+        case "webm": return "video/webm"
+        case "ogv": return "video/ogg"
+        case "mp3", "mp2", "mpga": return "audio/mpeg"
+        case "m4a", "aac", "m4b": return "audio/mp4"
+        case "wav": return "audio/wav"
+        case "ogg", "oga": return "audio/ogg"
+        case "flac": return "audio/flac"
+        case "opus": return "audio/opus"
+        default: return "application/octet-stream"
+        }
+    }
+
+    static func byteRange(from header: String, size: Int) -> (Int, Int)? {
+        guard size > 0 else { return nil }
+        guard let line = header.split(separator: "\r\n").first(where: { $0.lowercased().hasPrefix("range:") }) else {
+            return nil
+        }
+        let value = line.drop { $0 != ":" }.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.lowercased().hasPrefix("bytes=") else { return nil }
+        let spec = value.dropFirst(6)
+        let parts = spec.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let start = Int(parts.first ?? "") ?? 0
+        let end = parts.count > 1 && !parts[1].isEmpty ? min(Int(parts[1]) ?? (size - 1), size - 1) : size - 1
+        guard start >= 0, start <= end, start < size else { return nil }
+        return (start, end)
     }
 
     static func qrCode(from string: String, dimension: CGFloat = 280) -> NSImage? {

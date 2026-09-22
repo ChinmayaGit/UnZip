@@ -13,6 +13,8 @@ struct FileBrowserView: View {
     @ViewState private var marqueeCurrent: CGPoint?
     @ViewState private var marqueeOnItem = false
     @ViewState private var marqueeBaseIDs: Set<String> = []
+    @ViewState private var lastClickID: String?
+    @ViewState private var lastClickAt = Date.distantPast
 
     private var appearance: AppearancePreferences { state.appearance }
 
@@ -88,7 +90,8 @@ struct FileBrowserView: View {
     }
 
     private var shouldShowMediaBar: Bool {
-        state.media.item != nil || folderTracks.count >= 1
+        if state.media.item?.isVideo == true { return false }
+        return state.media.item != nil || folderTracks.count >= 1
     }
 
     private var detailsView: some View {
@@ -170,16 +173,17 @@ struct FileBrowserView: View {
                 guard item.canEnter else { return false }
                 return acceptDrop(providers, into: item.url)
             }
-            .onTapGesture(count: 2) {
-                select(item, exclusive: true)
-                state.openFileItem(item)
-            }
             .onTapGesture {
-                select(item)
+                handleItemClick(item)
             }
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(browser.selectedIDs.contains(item.id) ? Color.accentColor.opacity(0.22) : Color.clear)
+                    .padding(.horizontal, 4)
+            )
             .contextMenu {
                 Group { contextButtons(for: item) }
-                    .onAppear { selectIfNeeded(item) }
+                    .onAppear { select(item, keepIfAlreadySelected: true) }
             }
         }
         .listStyle(.inset)
@@ -241,30 +245,31 @@ struct FileBrowserView: View {
                 .multilineTextAlignment(.center)
                 .frame(width: tile - 12, height: 32)
                 .padding(.horizontal, 4)
-                .background(selected ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .background(
+                    selected ? Color.accentColor : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 4, style: .continuous)
+                )
                 .foregroundStyle(selected ? Color.white : Color.primary)
         }
+        .padding(.vertical, 6)
         .frame(width: tile)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? Color.accentColor.opacity(0.7) : Color.clear, lineWidth: 2)
+        )
         .contentShape(Rectangle())
         .background(itemFrameReporter(item.id))
         .fileDrag(item, browser: browser)
-        .onTapGesture(count: 2) {
-            select(item, exclusive: true)
-            state.openFileItem(item)
-        }
         .onTapGesture {
-            select(item)
+            handleItemClick(item)
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0).onChanged { _ in
-                if NSEvent.pressedMouseButtons == 2 {
-                    selectIfNeeded(item)
-                }
-            }
-        )
         .contextMenu {
             Group { contextButtons(for: item) }
-                .onAppear { selectIfNeeded(item) }
+                .onAppear { select(item, keepIfAlreadySelected: true) }
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard item.canEnter else { return false }
@@ -507,31 +512,26 @@ struct FileBrowserView: View {
     }
 
     private var marqueeGesture: some Gesture {
-        DragGesture(minimumDistance: 4, coordinateSpace: .named("files"))
+        DragGesture(minimumDistance: 8, coordinateSpace: .named("files"))
             .onChanged { value in
                 if marqueeStart == nil {
                     marqueeStart = value.startLocation
-                    marqueeOnItem = itemFrames.contains { $0.value.insetBy(dx: -4, dy: -4).contains(value.startLocation) }
+                    marqueeOnItem = itemFrames.contains { $0.value.insetBy(dx: -6, dy: -6).contains(value.startLocation) }
                     marqueeBaseIDs = NSEvent.modifierFlags.contains(.shift) || NSEvent.modifierFlags.contains(.command)
                         ? browser.selectedIDs
                         : []
-                    if marqueeOnItem { return }
-                    if !NSEvent.modifierFlags.contains(.shift), !NSEvent.modifierFlags.contains(.command) {
-                        browser.selectedIDs = []
-                    }
                 }
-                if marqueeOnItem { return }
+                guard !marqueeOnItem else { return }
                 marqueeCurrent = value.location
                 if let rect = marqueeRect {
                     let hits = Set(itemFrames.compactMap { $0.value.intersects(rect) ? $0.key : nil })
                     browser.selectedIDs = marqueeBaseIDs.union(hits)
+                    if let last = items.last(where: { hits.contains($0.id) }) {
+                        browser.selectionAnchorID = last.id
+                    }
                 }
             }
-            .onEnded { value in
-                if !marqueeOnItem, abs(value.translation.width) < 4, abs(value.translation.height) < 4,
-                   !NSEvent.modifierFlags.contains(.command) {
-                    browser.selectedIDs = []
-                }
+            .onEnded { _ in
                 marqueeStart = nil
                 marqueeCurrent = nil
                 marqueeOnItem = false
@@ -550,7 +550,21 @@ struct FileBrowserView: View {
         browser.selectionAnchorID = nil
     }
 
-    private func select(_ item: FileItem, exclusive: Bool = false) {
+    private func handleItemClick(_ item: FileItem) {
+        let now = Date()
+        let isDouble = lastClickID == item.id && now.timeIntervalSince(lastClickAt) < 0.4
+        lastClickID = item.id
+        lastClickAt = now
+        select(item, exclusive: isDouble)
+        if isDouble {
+            state.openFileItem(item)
+        }
+    }
+
+    private func select(_ item: FileItem, exclusive: Bool = false, keepIfAlreadySelected: Bool = false) {
+        if keepIfAlreadySelected, browser.selectedIDs.contains(item.id) {
+            return
+        }
         let command = !exclusive && NSEvent.modifierFlags.contains(.command)
         let shift = !exclusive && NSEvent.modifierFlags.contains(.shift)
         if shift, let anchor = browser.selectionAnchorID ?? browser.selectedIDs.first,
@@ -568,12 +582,6 @@ struct FileBrowserView: View {
         } else {
             browser.selectedIDs = [item.id]
             browser.selectionAnchorID = item.id
-        }
-    }
-
-    private func selectIfNeeded(_ item: FileItem) {
-        if !browser.selectedIDs.contains(item.id) {
-            select(item)
         }
     }
 
