@@ -14,10 +14,10 @@ done
 
 BIN=""
 if [[ "$UNIVERSAL" -eq 1 ]]; then
-  swift build -c release --arch arm64 --product UnZip
-  swift build -c release --arch x86_64 --product UnZip
-  ARM="$(find "$ROOT/.build" -path '*arm64*release/UnZip' -type f | head -n 1)"
-  X86="$(find "$ROOT/.build" -path '*x86_64*release/UnZip' -type f | head -n 1)"
+  swift build -c release --arch arm64 --product UnZip --scratch-path "$ROOT/.build/arm64"
+  swift build -c release --arch x86_64 --product UnZip --scratch-path "$ROOT/.build/x86_64"
+  ARM="$(find "$ROOT/.build/arm64" -name UnZip -type f ! -path '*.dSYM*' | head -n 1)"
+  X86="$(find "$ROOT/.build/x86_64" -name UnZip -type f ! -path '*.dSYM*' | head -n 1)"
   if [[ -n "$ARM" && -n "$X86" ]]; then
     BIN="$ROOT/.build/UnZip-universal"
     lipo -create "$ARM" "$X86" -output "$BIN"

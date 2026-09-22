@@ -2,9 +2,23 @@
 
 A native macOS file explorer that also opens archives, plays music and video, and compresses folders.
 
+**Free for anyone.** No account, no license key, no paid permission. The app is [public domain](LICENSE).
+
 Requires **macOS 14** or later. Works on **Apple Silicon** and **Intel**.
 
 Full walkthrough: **[How to use](HowToUse.md)** — every feature, what it is for, and how to use it.
+
+## Download
+
+Get the latest build from **[Releases](https://github.com/ChinmayaGit/UnZip/releases/latest)**. Use any one file:
+
+- `UnZip-1.1.0.dmg` — drag the app into Applications
+- `UnZip-1.1.0.pkg` — double-click to install
+- `UnZip-1.1.0-macos.zip` — unpack and move `UnZip.app` into Applications
+
+No sign-in. No license agreement.
+
+The first time macOS may say the app cannot be opened (it is not signed with an Apple Developer ID). That is not a license. Control-click **UnZip**, choose **Open**, then click **Open** again.
 
 ## Screenshots
 
@@ -54,9 +68,10 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 - **Path bar** — click folders, edit the path, **copy** it, or open **Terminal** in that folder
 - **Folder covers** — first picture in a folder becomes the icon; per-folder or global
 - **File actions** — copy, cut, paste, duplicate, move, rename, trash, drag-drop (Option = copy)
+- **Open With** — pick VLC, QuickTime, Preview, or any other app; **Set as Default** for that file type
 - **Images** — fullscreen viewer; left / right through the folder
 - **Music** — play/pause, next, seek, volume, shuffle, auto-next, loop, album art
-- **Video** — play/pause, volume, fullscreen; VP9 buffered through VLC if installed
+- **Video** — play/pause, volume, fullscreen; VP9 picture is prepared through VLC if installed
 - **Archives** — ZIP, RAR, 7Z, TAR, ISO, DMG, and more; extract and create
 - **FTP / FTPS / SFTP** — connect, browse, download
 - **Share (HTTP)** — QR + local web page so phones and browsers can play or download
@@ -64,35 +79,27 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 
 ## Install
 
-Use any one of the files in `dist/`:
-
-- `UnZip-1.0.dmg`
-- `UnZip-1.0.pkg`
-- `UnZip-1.0-macos.zip`
-
 ### Disk image (`.dmg`)
 
-1. Double-click `UnZip-1.0.dmg`.
+1. Double-click `UnZip-1.1.0.dmg`.
 2. Drag **UnZip** into the **Applications** folder.
 3. Open UnZip from Applications or Spotlight.
 4. If macOS says the app cannot be opened, Control-click UnZip, choose **Open**, then click **Open** again.
 
 ### Installer package (`.pkg`)
 
-1. Double-click `UnZip-1.0.pkg`.
-2. Follow the steps and click **Install**.
+1. Double-click `UnZip-1.1.0.pkg`.
+2. Follow the steps and click **Install**. There is no license to accept.
 3. UnZip is copied to `/Applications`.
 4. Open UnZip from Applications or Spotlight.
 5. If macOS blocks the first launch, Control-click UnZip in Applications, choose **Open**, then click **Open** again.
 
 ### Zip archive (`.zip`)
 
-1. Double-click `UnZip-1.0-macos.zip` to unpack it.
+1. Double-click `UnZip-1.1.0-macos.zip` to unpack it.
 2. Move `UnZip.app` into the **Applications** folder.
 3. Open UnZip from Applications or Spotlight.
 4. If macOS says the app cannot be opened, Control-click UnZip, choose **Open**, then click **Open** again.
-
-The first-launch warning is expected. The app is not signed with an Apple Developer ID.
 
 ## After install
 
@@ -114,7 +121,7 @@ From this project:
 ./scripts/package.sh
 ```
 
-That writes `UnZip-1.0.dmg`, `UnZip-1.0.pkg`, and `UnZip-1.0-macos.zip` into `dist/`.
+That writes `UnZip-1.1.0.dmg`, `UnZip-1.1.0.pkg`, and `UnZip-1.1.0-macos.zip` into `dist/`.
 
 For a local copy only:
 

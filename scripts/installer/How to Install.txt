@@ -1,6 +1,8 @@
 UnZip for macOS
 ===============
 
+Free for anyone. No account, no license key, no paid permission.
+
 Requires macOS 14 or later. Works on Apple Silicon and Intel.
 
 Install from the disk image
@@ -12,7 +14,8 @@ Install from the disk image
 
 Install from the package
 ------------------------
-Double-click UnZip-1.0.pkg and follow the steps.
+Double-click the .pkg in this folder and follow the steps.
+There is no license to accept.
 The app is installed in /Applications.
 
 After install
@@ -21,3 +24,6 @@ Right-click a folder or file in Finder → Services → Zip with UnZip.
 
 Optional (RAR / 7Z extract):
   brew install unar p7zip
+
+Optional (VP9 video picture):
+  install VLC from https://www.videolan.org/vlc/

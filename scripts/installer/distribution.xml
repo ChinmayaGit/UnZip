@@ -14,5 +14,5 @@
     <choice id="com.unzip.app" visible="false">
         <pkg-ref id="com.unzip.app"/>
     </choice>
-    <pkg-ref id="com.unzip.app" version="1.0" onConclusion="none">UnZip-component.pkg</pkg-ref>
+    <pkg-ref id="com.unzip.app" version="1.1.0" onConclusion="none">UnZip-component.pkg</pkg-ref>
 </installer-gui-script>

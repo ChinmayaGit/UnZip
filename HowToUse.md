@@ -2,7 +2,11 @@
 
 UnZip is a file explorer first. It also opens archives, plays music and video, talks to FTP servers, and shares files over your local network.
 
-Install and build notes live in [README.md](README.md).
+**Free for anyone** — no account, no license key, no paid permission. The app is [public domain](LICENSE).
+
+Install: download a `.dmg`, `.pkg`, or `.zip` from **[Releases](https://github.com/ChinmayaGit/UnZip/releases/latest)**. Build notes live in [README.md](README.md).
+
+If macOS blocks the first launch, Control-click UnZip → **Open**. That is Gatekeeper, not a license.
 
 ![File explorer](Pics/explorer-movies.png)
 
@@ -134,7 +138,7 @@ Formats include MP3, AAC, M4A, FLAC, WAV, AIFF, Opus, OGG, and others.
 
 MP4, MOV, M4V, MKV, WebM, and similar containers are recognized.
 
-Some downloads (VP9 + Opus, many YouTube files) cannot be decoded by macOS. Install [VLC](https://www.videolan.org/vlc/). UnZip then **buffers** a live convert so the picture starts quickly instead of waiting for the whole file. Playing the same file again is faster.
+Some downloads (VP9 + Opus, many YouTube files) cannot be decoded by macOS. Install [VLC](https://www.videolan.org/vlc/). UnZip then **prepares** an H.264 copy so the picture can play in the preview pane. Playing the same file again is faster. Or right-click **Open With → VLC**.
 
 ---
 
