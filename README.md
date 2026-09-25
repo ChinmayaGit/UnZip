@@ -41,6 +41,8 @@ Share files on the local network with a QR code or HTTP link. Other UnZip apps n
 ![Share in a browser](Pics/share-web.png)
 
 ![Share on a phone](Pics/share-phone.jpg)
+| &nbsp; | <img src="Pics/share-phone.jpg" alt="Share on a phone" width="280"> | &nbsp; |
+| :---: | :---: | :---: |
 
 Right-click a folder for Folder Image, Details, copy / cut / paste, compress, and trash.
 
