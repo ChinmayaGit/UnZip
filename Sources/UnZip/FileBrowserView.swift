@@ -728,6 +728,30 @@ struct FileGlyph: View {
     @ObservedObject var covers: FolderCoverStore
 
     var body: some View {
+        if item.isApplication {
+            applicationGlyph
+        } else {
+            folderOrFileGlyph
+        }
+    }
+
+    private var applicationGlyph: some View {
+        Group {
+            if let image = covers.image(for: item.url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else {
+                Image(systemName: "app.fill")
+                    .font(.system(size: max(12, size * 0.42), weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var folderOrFileGlyph: some View {
         ZStack {
             RoundedRectangle(cornerRadius: corner, style: .continuous)
                 .fill(selected ? Color.clear : Color(nsColor: .controlBackgroundColor))

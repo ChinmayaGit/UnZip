@@ -17,7 +17,7 @@ If macOS blocks the first launch, Control-click UnZip → **Open**. That is Gate
 **What it is for:** Browse your Mac like Finder, without leaving the app.
 
 1. Open UnZip. It starts in your last folder, or Home.
-2. Use the **sidebar**: Home, Desktop, Documents, Downloads, Pictures, Movies, Music, Applications. Plug in a USB stick or external disk and it appears under **Devices**. Right-click a drive to **Eject**.
+2. Use the **sidebar**: Home, Desktop, Documents, Downloads, Pictures, Movies, Music, Applications. The **Applications** tab shows each app’s real icon. Plug in a USB stick or external disk and it appears under **Devices**. Right-click a drive to **Eject**.
 3. Double-click a folder to enter it. Double-click a file to preview, play, or open it.
 4. Switch views on the tab bar: **Details**, **Grid**, **Large** (and more if you turn them on in Settings).
 5. Use **Filter** and **Sort** on the same bar. Search the current folder from the search field.
@@ -215,11 +215,27 @@ This is not a full website host. It is for file servers. Sharing files to a phon
 2. **File → Share…** or **Shift-Command-S**, or right-click **Share…**.
 3. A QR code and an `http://` link appear (for example `http://192.168.1.6:65393/`).
 4. On another UnZip on the same network, the device shows up under **Nearby UnZip**.
-5. On a phone or computer, scan the QR or open the link. You can **play** photos, video, and music, or **Download**.
+5. On a phone or computer, scan the QR or open the link.
 
-![Share page in a browser](Pics/share-web.png)
+On a **computer**, the page is a file browser, not a full-page player:
 
-![Share page on a phone](Pics/share-phone.jpg)
+| Control | What it does |
+| --- | --- |
+| Details | Name, kind, size, and Download in columns |
+| List | Compact rows |
+| Grid / Large | Tiles. **Size** changes how big they are |
+| Filter / Sort / Search | Photos, videos, music, or files; sort by name, size, or kind |
+| Click a file | Opens a preview to play a photo, video, or song. Use **Download** there or on the row |
+
+![Share page in a browser — Large](Pics/share-web.png)
+
+![Share page in a browser — List](Pics/share-web-list.png)
+
+On a **phone**, the same views are there. List is the default.
+
+| <img src="Pics/share-phone-list.jpg" alt="Share on a phone — List" width="240"> | <img src="Pics/share-phone-grid.jpg" alt="Share on a phone — Grid" width="240"> | <img src="Pics/share-phone-preview.jpg" alt="Share on a phone — Preview" width="240"> |
+| :---: | :---: | :---: |
+| List | Grid | Preview |
 
 Same Wi‑Fi. No account. Stop sharing when you are done.
 

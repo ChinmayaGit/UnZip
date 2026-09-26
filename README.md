@@ -12,9 +12,9 @@ Full walkthrough: **[How to use](HowToUse.md)** — every feature, what it is fo
 
 Get the latest build from **[Releases](https://github.com/ChinmayaGit/UnZip/releases/latest)**. Use any one file:
 
-- `UnZip-1.2.0.dmg` — drag the app into Applications
-- `UnZip-1.2.0.pkg` — double-click to install
-- `UnZip-1.2.0-macos.zip` — unpack and move `UnZip.app` into Applications
+- `UnZip-1.3.0.dmg` — drag the app into Applications
+- `UnZip-1.3.0.pkg` — double-click to install
+- `UnZip-1.3.0-macos.zip` — unpack and move `UnZip.app` into Applications
 
 No sign-in. No license agreement.
 
@@ -34,15 +34,17 @@ Connect to FTP, FTPS, or SFTP and browse remote files without leaving the app.
 
 ![Connect to server](Pics/connect-server.png)
 
-Share files on the local network with a QR code or HTTP link. Other UnZip apps nearby can receive them; a phone or browser can play and download them.
+Share files on the local network with a QR code or HTTP link. Other UnZip apps nearby can receive them. On a computer the share page is a file list — **Details**, **List**, **Grid**, **Large**, plus Size, Filter, Sort, and Search. Click a file to play it; it does not take over the page.
 
 ![Share QR](Pics/share-qr.png)
 
-![Share in a browser](Pics/share-web.png)
+![Share in a browser — Large](Pics/share-web.png)
 
-![Share on a phone](Pics/share-phone.jpg)
-| &nbsp; | <img src="Pics/share-phone.jpg" alt="Share on a phone" width="280"> | &nbsp; |
+![Share in a browser — List](Pics/share-web-list.png)
+
+| <img src="Pics/share-phone-list.jpg" alt="Share on a phone — List" width="280"> | <img src="Pics/share-phone-grid.jpg" alt="Share on a phone — Grid" width="280"> | <img src="Pics/share-phone-preview.jpg" alt="Share on a phone — Preview" width="280"> |
 | :---: | :---: | :---: |
+| List | Grid | Preview |
 
 Right-click a folder for Folder Image, Details, copy / cut / paste, compress, and trash.
 
@@ -66,7 +68,7 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 
 ## What UnZip does
 
-- **File explorer** — default home screen. Sidebar, path bar, multiple views, sort, filter, search, preview
+- **File explorer** — default home screen. Sidebar, path bar, multiple views, sort, filter, search, preview. Applications shows each app’s real icon
 - **Sidebar** — Favorites, Devices, Archives, Servers, Recent. Close an archive, server, or recent item with **X**. Recent has **Clear All**. Turn sections on or off in Settings
 - **Devices** — USB sticks, external disks, and network volumes in the sidebar, with Eject
 - **Path bar** — click folders, edit the path, **copy** it, or open **Terminal** in that folder
@@ -78,21 +80,21 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 - **Video** — play/pause, volume, fullscreen; VP9 picture is prepared through VLC if installed
 - **Archives** — ZIP, RAR, 7Z, TAR, ISO, DMG, and more; extract and create
 - **FTP / FTPS / SFTP** — connect, browse, download
-- **Share (HTTP)** — QR + local web page so phones and browsers can play or download
+- **Share (HTTP)** — QR + local web page with Details / List / Grid / Large, Size, and a preview. Phones and browsers can play or download
 - **Finder service** — Zip with UnZip from the right-click menu
 
 ## Install
 
 ### Disk image (`.dmg`)
 
-1. Double-click `UnZip-1.2.0.dmg`.
+1. Double-click `UnZip-1.3.0.dmg`.
 2. Drag **UnZip** into the **Applications** folder.
 3. Open UnZip from Applications or Spotlight.
 4. If macOS says the app cannot be opened, Control-click UnZip, choose **Open**, then click **Open** again.
 
 ### Installer package (`.pkg`)
 
-1. Double-click `UnZip-1.2.0.pkg`.
+1. Double-click `UnZip-1.3.0.pkg`.
 2. Follow the steps and click **Install**. There is no license to accept.
 3. UnZip is copied to `/Applications`.
 4. Open UnZip from Applications or Spotlight.
@@ -100,7 +102,7 @@ In Finder, right-click a folder or file → **Services → Zip with UnZip**.
 
 ### Zip archive (`.zip`)
 
-1. Double-click `UnZip-1.2.0-macos.zip` to unpack it.
+1. Double-click `UnZip-1.3.0-macos.zip` to unpack it.
 2. Move `UnZip.app` into the **Applications** folder.
 3. Open UnZip from Applications or Spotlight.
 4. If macOS says the app cannot be opened, Control-click UnZip, choose **Open**, then click **Open** again.
@@ -125,7 +127,7 @@ From this project:
 ./scripts/package.sh
 ```
 
-That writes `UnZip-1.2.0.dmg`, `UnZip-1.2.0.pkg`, and `UnZip-1.2.0-macos.zip` into `dist/`.
+That writes `UnZip-1.3.0.dmg`, `UnZip-1.3.0.pkg`, and `UnZip-1.3.0-macos.zip` into `dist/`.
 
 For a local copy only:
 

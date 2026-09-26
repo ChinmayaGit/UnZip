@@ -50,6 +50,14 @@ struct FileItem: Identifiable, Hashable, Sendable {
 
     var id: String { url.standardizedFileURL.path }
     var canEnter: Bool { isDirectory && !isPackage }
+    var isApplication: Bool {
+        if url.pathExtension.lowercased() == "app" { return true }
+        if isAlias, resolvedURL.pathExtension.lowercased() == "app" { return true }
+        if isPackage, let type = UTType(filenameExtension: url.pathExtension.lowercased()), type.conforms(to: .application) {
+            return true
+        }
+        return false
+    }
     var isArchive: Bool { !isDirectory && FormatDetector.isUnzippable(url) }
     var isImage: Bool { FolderCover.isImage(url) }
     var isVideo: Bool { !isDirectory && MediaKind.isVideo(url) }
@@ -91,6 +99,7 @@ struct FileItem: Identifiable, Hashable, Sendable {
     }
 
     var systemImage: String {
+        if isApplication { return "app.fill" }
         if canEnter { return "folder.fill" }
         if isArchive { return ArchiveFormat.from(url: url).systemImage }
         return FileAppearance.icon(forFileNamed: name)
@@ -235,6 +244,10 @@ final class FolderCoverStore: ObservableObject {
     }
 
     func request(_ item: FileItem, appearance: AppearancePreferences) {
+        if item.isApplication {
+            requestWorkspaceIcon(for: item.url)
+            return
+        }
         if item.canEnter {
             let style = appearance.coverStyle(for: item.url)
             switch style.mode {
@@ -250,6 +263,19 @@ final class FolderCoverStore: ObservableObject {
         }
         guard item.isImage else { return }
         request(item.url, source: item.url, isDirectoryCover: false)
+    }
+
+    private func requestWorkspaceIcon(for url: URL) {
+        let key = url.standardizedFileURL.path
+        guard images[key] == nil, !requested.contains(key) else { return }
+        requested.insert(key)
+        let path = url.path
+        Task { @MainActor in
+            let icon = NSWorkspace.shared.icon(forFile: path)
+            icon.size = NSSize(width: 256, height: 256)
+            trimIfNeeded()
+            images[key] = icon
+        }
     }
 
     private func request(_ keyURL: URL, source: URL, isDirectoryCover: Bool) {
@@ -273,8 +299,8 @@ final class FolderCoverStore: ObservableObject {
     }
 
     private func trimIfNeeded() {
-        guard images.count > 256 else { return }
-        for key in images.keys.prefix(images.count - 200) {
+        guard images.count > 400 else { return }
+        for key in images.keys.prefix(images.count - 320) {
             images.removeValue(forKey: key)
             requested.remove(key)
         }

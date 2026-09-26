@@ -354,85 +354,379 @@ final class FileShare: ObservableObject {
     }
 
     private func webPage() -> String {
-        let images = files.filter { $0.previewKind == "image" }
-        let videos = files.filter { $0.previewKind == "video" }
-        let songs = files.filter { $0.previewKind == "audio" }
-        let others = files.filter { $0.previewKind == "file" }
-        var sections: [String] = []
-        if !videos.isEmpty {
-            sections.append("<h2>Videos</h2><div class=\"media\">" + videos.map { file in
-                let safe = Self.escape(file.name)
-                return """
-                <article class="tile">
-                  <video controls preload="metadata" src="/p/\(file.id)" playsinline></video>
-                  <div class="meta"><strong>\(safe)</strong><a href="/d/\(file.id)">Download</a></div>
-                </article>
-                """
-            }.joined() + "</div>")
+        struct PageFile: Encodable {
+            var id: String
+            var name: String
+            var size: Int64
+            var kind: String
+            var ext: String
         }
-        if !images.isEmpty {
-            sections.append("<h2>Photos</h2><div class=\"grid\">" + images.map { file in
-                let safe = Self.escape(file.name)
-                return """
-                <a class="shot" href="/p/\(file.id)" target="_blank" title="\(safe)">
-                  <img src="/p/\(file.id)" alt="\(safe)" loading="lazy">
-                  <span>\(safe)</span>
-                </a>
-                """
-            }.joined() + "</div>")
+        let items = files.map { file in
+            PageFile(
+                id: file.id,
+                name: file.name,
+                size: file.size,
+                kind: file.previewKind,
+                ext: URL(fileURLWithPath: file.name).pathExtension.lowercased()
+            )
         }
-        if !songs.isEmpty {
-            sections.append("<h2>Music</h2><div class=\"media\">" + songs.map { file in
-                let safe = Self.escape(file.name)
-                return """
-                <article class="tile audio">
-                  <div class="meta"><strong>\(safe)</strong><a href="/d/\(file.id)">Download</a></div>
-                  <audio controls preload="metadata" src="/p/\(file.id)"></audio>
-                </article>
-                """
-            }.joined() + "</div>")
-        }
-        if !others.isEmpty || files.isEmpty {
-            let rows = others.map { file in
-                let safe = Self.escape(file.name)
-                return "<a class=\"file\" href=\"/d/\(file.id)\"><strong>\(safe)</strong><span>\(ByteFormat.string(file.size))</span></a>"
-            }.joined()
-            let body = rows.isEmpty
-                ? "<p class=\"empty\">This Mac is online with UnZip. Ask them to tap Share on the files they want to send.</p>"
-                : rows
-            sections.append("<h2>Files</h2><div class=\"card\">\(body)</div>")
-        }
+        let json = String(data: (try? JSONEncoder().encode(items)) ?? Data("[]".utf8), encoding: .utf8)?
+            .replacingOccurrences(of: "<", with: "\\u003c") ?? "[]"
         return """
         <!doctype html>
-        <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <html lang="en"><head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
         <title>UnZip Share</title>
         <style>
-        body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;background:#0f1115;color:#f2f4f8}
-        main{max-width:880px;margin:0 auto;padding:28px 20px 56px}
-        h1{font-size:28px;margin:0 0 6px}
-        h2{font-size:18px;margin:28px 0 12px}
-        .sub{color:#9aa3b2;margin:0 0 10px}
-        .card,.media{display:flex;flex-direction:column;gap:12px}
-        .card{background:#1a1f27;border-radius:16px;padding:16px}
-        .file{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:12px;background:#262c36;color:#fff;text-decoration:none}
-        .file span,.empty{color:#9aa3b2}
-        .tile{background:#1a1f27;border-radius:16px;overflow:hidden}
-        .tile video{width:100%;max-height:70vh;background:#000;display:block}
-        .tile audio{width:calc(100% - 24px);margin:0 12px 12px}
-        .meta{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;align-items:center}
-        .meta a{color:#7cb8ff;text-decoration:none}
-        .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-        .shot{display:block;background:#1a1f27;border-radius:14px;overflow:hidden;color:#fff;text-decoration:none}
-        .shot img{width:100%;height:150px;object-fit:cover;background:#111;display:block}
-        .shot span{display:block;padding:8px 10px;font-size:12px;color:#c5cdd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .hint{margin-top:22px;color:#9aa3b2;font-size:14px;line-height:1.45}
-        </style></head>
-        <body><main>
-        <h1>UnZip Share</h1>
-        <p class="sub">From \(Self.escape(deviceName)) — play photos, videos, and music here, or download them.</p>
-        \(sections.joined())
-        <p class="hint">You don’t need the UnZip app. Play media in this page, or download a file. For nearby sharing next time, install UnZip on this device.</p>
-        </main></body></html>
+        :root{--bg:#0f1115;--panel:#1a1f27;--line:#2a3140;--text:#f2f4f8;--muted:#9aa3b2;--accent:#7cb8ff;--pick:#4d8dff;--cell:132px;--scale:1}
+        *{box-sizing:border-box}
+        html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,BlinkMacSystemFont,Helvetica,sans-serif}
+        body{display:flex;flex-direction:column}
+        header{position:sticky;top:0;z-index:5;background:rgba(15,17,21,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:16px 22px 12px}
+        h1{font-size:22px;margin:0}
+        .sub{color:var(--muted);margin:4px 0 12px;font-size:13px}
+        .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+        .views{display:flex;flex-wrap:wrap;gap:4px;padding:3px;background:#141820;border:1px solid var(--line);border-radius:10px}
+        .views button,.ctrl button{appearance:none;border:0;background:transparent;color:var(--text);padding:6px 10px;border-radius:7px;cursor:pointer;font:13px/1.2 inherit}
+        .views button.on{background:rgba(77,141,255,.22);color:#dbe8ff}
+        .ctrl{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+        .ctrl input[type=range]{width:110px;accent-color:var(--pick)}
+        .ctrl select,.ctrl input[type=search]{background:#141820;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:13px inherit}
+        .ctrl input[type=search]{width:min(220px,40vw)}
+        .grow{flex:1}
+        main{flex:1;padding:16px 22px 40px}
+        .empty{color:var(--muted);max-width:520px;margin:40px auto;text-align:center}
+        table{width:100%;border-collapse:collapse}
+        th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:118px;background:var(--bg)}
+        td{padding:8px 10px;border-bottom:1px solid #1d232d;vertical-align:middle}
+        tr{cursor:pointer}
+        tr:hover td{background:#171c24}
+        tr.on td{background:rgba(77,141,255,.18)}
+        .name{display:flex;align-items:center;gap:10px;min-width:0}
+        .name span,.tile-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .muted{color:var(--muted)}
+        a.dl{color:var(--accent);text-decoration:none;font-size:13px}
+        a.dl:hover{text-decoration:underline}
+        .rows{display:flex;flex-direction:column;gap:2px}
+        .row{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px;cursor:pointer}
+        .row:hover{background:#171c24}
+        .row.on{background:rgba(77,141,255,.2)}
+        .row .size{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+        .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--cell)*var(--scale)),1fr));gap:14px}
+        .tile{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px 12px;border-radius:16px;cursor:pointer;min-width:0}
+        .tile:hover{background:#171c24}
+        .tile.on{background:rgba(77,141,255,.2);box-shadow:inset 0 0 0 2px rgba(124,184,255,.7)}
+        .tile-name{width:100%;text-align:center;font-size:12px}
+        .glyph{width:calc(28px*var(--scale));height:calc(28px*var(--scale));border-radius:8px;display:grid;place-items:center;background:#262c36;flex:none;overflow:hidden;position:relative}
+        table .glyph,.rows .glyph{width:calc(28px*var(--scale));height:calc(28px*var(--scale))}
+        .tiles .glyph{width:calc(var(--cell)*var(--scale) - 36px);height:calc(var(--cell)*var(--scale) - 36px);border-radius:14px;background:#11151c}
+        .glyph img{width:100%;height:100%;object-fit:cover;display:block}
+        .glyph.video{background:#0b0d12}
+        .glyph .mark{position:absolute;inset:auto auto 8px 8px;background:rgba(0,0,0,.55);color:#fff;border-radius:8px;padding:3px 7px;font-size:11px}
+        .kind-video::after,.kind-audio::after,.kind-file::after{position:absolute;font-size:22px;color:#fff}
+        .kind-video::after{content:"▶"}
+        .kind-audio::after{content:"♪";color:#c9d4e5}
+        .kind-file::after{content:"▢";color:#9aa3b2;font-size:20px}
+        dialog{border:0;padding:0;background:transparent;max-width:none;width:min(960px,94vw)}
+        dialog::backdrop{background:rgba(0,0,0,.72)}
+        .preview{background:var(--panel);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+        .preview-bar{display:flex;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+        .preview-bar button{appearance:none;border:0;background:#262c36;color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;font:13px inherit}
+        .preview-bar strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .preview-body{background:#000;min-height:120px;display:grid;place-items:center}
+        .preview-body img,.preview-body video{max-width:100%;max-height:min(70vh,720px);display:block}
+        .preview-body audio{width:min(520px,90%);margin:36px}
+        .preview-body .none{color:var(--muted);padding:40px 20px;text-align:center}
+        .hint{margin:22px 22px 0;color:var(--muted);font-size:13px}
+        @media(max-width:720px){
+          header,main{padding-left:14px;padding-right:14px}
+          .ctrl.desk{display:none}
+          th{top:0;position:static}
+        }
+        </style>
+        </head>
+        <body>
+        <header>
+          <h1>UnZip Share</h1>
+          <p class="sub">From \(Self.escape(deviceName)) — browse like a file list, then play or download.</p>
+          <div class="toolbar">
+            <div class="views" id="views">
+              <button data-view="details">Details</button>
+              <button data-view="list">List</button>
+              <button data-view="grid">Grid</button>
+              <button data-view="large">Large</button>
+            </div>
+            <label class="ctrl desk">Size <input id="size" type="range" min="70" max="180" value="100"></label>
+            <label class="ctrl">Filter
+              <select id="filter">
+                <option value="all">All</option>
+                <option value="image">Photos</option>
+                <option value="video">Videos</option>
+                <option value="audio">Music</option>
+                <option value="file">Files</option>
+              </select>
+            </label>
+            <label class="ctrl">Sort
+              <select id="sort">
+                <option value="name">Name</option>
+                <option value="size">Size</option>
+                <option value="kind">Kind</option>
+              </select>
+            </label>
+            <button class="ctrl" id="dir" type="button" title="Sort direction">↑</button>
+            <span class="grow"></span>
+            <label class="ctrl"><input id="q" type="search" placeholder="Search"></label>
+          </div>
+        </header>
+        <main id="main"></main>
+        <p class="hint">You don’t need UnZip on this device. Open a photo, video, or song to play it, or download any file.</p>
+        <dialog id="dlg">
+          <div class="preview">
+            <div class="preview-bar">
+              <button type="button" id="prev" title="Previous">‹</button>
+              <strong id="pname"></strong>
+              <button type="button" id="next" title="Next">›</button>
+              <a class="dl" id="pdl" href="#">Download</a>
+              <button type="button" id="close">Close</button>
+            </div>
+            <div class="preview-body" id="pbody"></div>
+          </div>
+        </dialog>
+        <script>
+        const FILES = \(json);
+        const store = window.localStorage;
+        const desktop = window.matchMedia("(min-width: 720px)").matches;
+        let view = store.getItem("unzip.share.view") || (desktop ? "grid" : "list");
+        let scale = Number(store.getItem("unzip.share.scale") || 100);
+        let filter = "all";
+        let sort = "name";
+        let dir = 1;
+        let selected = "";
+        let shown = [];
+        const main = document.getElementById("main");
+        const size = document.getElementById("size");
+        const dlg = document.getElementById("dlg");
+        size.value = String(scale);
+        document.getElementById("filter").onchange = function(){ filter = this.value; draw(); };
+        document.getElementById("sort").onchange = function(){ sort = this.value; draw(); };
+        document.getElementById("q").oninput = function(){ draw(); };
+        document.getElementById("dir").onclick = function(){ dir *= -1; this.textContent = dir > 0 ? "↑" : "↓"; draw(); };
+        size.oninput = function(){ scale = Number(this.value); store.setItem("unzip.share.scale", String(scale)); applyScale(); };
+        document.getElementById("views").onclick = function(e){
+          const b = e.target.closest("button");
+          if (!b) return;
+          view = b.getAttribute("data-view");
+          store.setItem("unzip.share.view", view);
+          draw();
+        };
+        document.getElementById("close").onclick = function(){ closePreview(); };
+        document.getElementById("prev").onclick = function(){ step(-1); };
+        document.getElementById("next").onclick = function(){ step(1); };
+        dlg.addEventListener("close", closePreview);
+        document.addEventListener("keydown", function(e){
+          if (!dlg.open) return;
+          if (e.key === "ArrowRight") step(1);
+          if (e.key === "ArrowLeft") step(-1);
+          if (e.key === "Escape") closePreview();
+        });
+        function applyScale(){
+          document.documentElement.style.setProperty("--scale", String(scale / 100));
+          document.documentElement.style.setProperty("--cell", view === "large" ? "196px" : "132px");
+        }
+        function kindLabel(k){ return k === "image" ? "Photo" : k === "video" ? "Video" : k === "audio" ? "Music" : "File"; }
+        function bytes(n){
+          if (n < 1024) return n + " B";
+          const u = ["KB","MB","GB","TB"];
+          let i = -1; let v = n;
+          do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
+          return (v < 10 ? v.toFixed(1) : Math.round(v)) + " " + u[i];
+        }
+        function glyph(file){
+          const box = document.createElement("div");
+          box.className = "glyph kind-" + file.kind + (file.kind === "video" ? " video" : "");
+          if (file.kind === "image") {
+            const img = document.createElement("img");
+            img.src = "/p/" + file.id;
+            img.alt = "";
+            img.loading = "lazy";
+            box.appendChild(img);
+          }
+          if (file.kind === "video") {
+            const mark = document.createElement("span");
+            mark.className = "mark";
+            mark.textContent = "Video";
+            box.appendChild(mark);
+          }
+          return box;
+        }
+        function visible(){
+          const q = document.getElementById("q").value.trim().toLowerCase();
+          const rows = FILES.filter(function(f){
+            if (filter !== "all" && f.kind !== filter) return false;
+            return !q || f.name.toLowerCase().indexOf(q) !== -1;
+          });
+          rows.sort(function(a,b){
+            let c = 0;
+            if (sort === "size") c = a.size - b.size;
+            else if (sort === "kind") c = a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name);
+            else c = a.name.localeCompare(b.name);
+            return c * dir;
+          });
+          return rows;
+        }
+        function openFile(file){
+          selected = file.id;
+          highlight();
+          document.getElementById("pname").textContent = file.name;
+          const link = document.getElementById("pdl");
+          link.href = "/d/" + file.id;
+          const body = document.getElementById("pbody");
+          body.replaceChildren();
+          if (file.kind === "image") {
+            const img = document.createElement("img");
+            img.src = "/p/" + file.id;
+            img.alt = file.name;
+            body.appendChild(img);
+          } else if (file.kind === "video") {
+            const v = document.createElement("video");
+            v.controls = true;
+            v.autoplay = true;
+            v.playsInline = true;
+            v.src = "/p/" + file.id;
+            body.appendChild(v);
+          } else if (file.kind === "audio") {
+            const a = document.createElement("audio");
+            a.controls = true;
+            a.autoplay = true;
+            a.src = "/p/" + file.id;
+            body.appendChild(a);
+          } else {
+            const p = document.createElement("div");
+            p.className = "none";
+            p.textContent = "No preview for this file. Use Download.";
+            body.appendChild(p);
+          }
+          if (!dlg.open) dlg.showModal();
+        }
+        function closePreview(){
+          document.getElementById("pbody").replaceChildren();
+          if (dlg.open) dlg.close();
+        }
+        function step(delta){
+          if (!shown.length) return;
+          let i = shown.findIndex(function(f){ return f.id === selected; });
+          if (i < 0) i = 0;
+          i = (i + delta + shown.length) % shown.length;
+          openFile(shown[i]);
+        }
+        function highlight(){
+          main.querySelectorAll("[data-id]").forEach(function(el){
+            el.classList.toggle("on", el.getAttribute("data-id") === selected);
+          });
+        }
+        function bind(el, file){
+          el.setAttribute("data-id", file.id);
+          el.onclick = function(e){
+            if (e.target.closest("a")) return;
+            openFile(file);
+          };
+        }
+        function draw(){
+          applyScale();
+          document.querySelectorAll("#views button").forEach(function(b){
+            b.classList.toggle("on", b.getAttribute("data-view") === view);
+          });
+          shown = visible();
+          const count = document.querySelector(".sub");
+          count.textContent = "From \(Self.escape(deviceName)) — " + shown.length + " item" + (shown.length === 1 ? "" : "s") + ". Click to play, or download.";
+          main.replaceChildren();
+          if (!FILES.length) {
+            const p = document.createElement("p");
+            p.className = "empty";
+            p.textContent = "This Mac is online with UnZip. Ask them to tap Share on the files they want to send.";
+            main.appendChild(p);
+            return;
+          }
+          if (!shown.length) {
+            const p = document.createElement("p");
+            p.className = "empty";
+            p.textContent = "No files match this view.";
+            main.appendChild(p);
+            return;
+          }
+          if (view === "details") {
+            const table = document.createElement("table");
+            table.innerHTML = "<thead><tr><th>Name</th><th>Kind</th><th>Size</th><th></th></tr></thead>";
+            const tb = document.createElement("tbody");
+            shown.forEach(function(file){
+              const tr = document.createElement("tr");
+              const name = document.createElement("td");
+              name.className = "name";
+              name.appendChild(glyph(file));
+              const label = document.createElement("span");
+              label.textContent = file.name;
+              name.appendChild(label);
+              const kind = document.createElement("td");
+              kind.className = "muted";
+              kind.textContent = kindLabel(file.kind);
+              const sz = document.createElement("td");
+              sz.className = "muted";
+              sz.textContent = bytes(file.size);
+              const act = document.createElement("td");
+              const a = document.createElement("a");
+              a.className = "dl";
+              a.href = "/d/" + file.id;
+              a.textContent = "Download";
+              act.appendChild(a);
+              tr.append(name, kind, sz, act);
+              bind(tr, file);
+              tb.appendChild(tr);
+            });
+            table.appendChild(tb);
+            main.appendChild(table);
+          } else if (view === "list") {
+            const wrap = document.createElement("div");
+            wrap.className = "rows";
+            shown.forEach(function(file){
+              const row = document.createElement("div");
+              row.className = "row";
+              row.appendChild(glyph(file));
+              const label = document.createElement("span");
+              label.textContent = file.name;
+              const sz = document.createElement("span");
+              sz.className = "size";
+              sz.textContent = bytes(file.size);
+              const a = document.createElement("a");
+              a.className = "dl";
+              a.href = "/d/" + file.id;
+              a.textContent = "Download";
+              row.append(label, sz, a);
+              bind(row, file);
+              wrap.appendChild(row);
+            });
+            main.appendChild(wrap);
+          } else {
+            const wrap = document.createElement("div");
+            wrap.className = "tiles";
+            shown.forEach(function(file){
+              const tile = document.createElement("div");
+              tile.className = "tile";
+              tile.appendChild(glyph(file));
+              const label = document.createElement("div");
+              label.className = "tile-name";
+              label.textContent = file.name;
+              tile.appendChild(label);
+              bind(tile, file);
+              wrap.appendChild(tile);
+            });
+            main.appendChild(wrap);
+          }
+          highlight();
+        }
+        draw();
+        </script>
+        </body></html>
         """
     }
 
