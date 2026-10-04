@@ -56,7 +56,10 @@ struct UnZipApp: App {
                     .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
                 Button("Paste") { state.pasteFiles() }
                     .keyboardShortcut("v", modifiers: .command)
-                    .disabled(!state.isShowingFiles)
+                    .disabled(!state.isShowingFiles || !state.canPasteFiles)
+                Button("Move Item Here") { state.movePasteFiles() }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
+                    .disabled(!state.isShowingFiles || !state.canPasteFiles)
                 Button("Duplicate") { state.duplicateFileItems(state.selectedFileItems()) }
                     .keyboardShortcut("d", modifiers: .command)
                     .disabled(!state.isShowingFiles || state.fileBrowser.selectedItems.isEmpty)
@@ -91,6 +94,10 @@ struct UnZipApp: App {
                 Button("as Tiles") { state.setLayout(.tiles) }
                 Button("as Gallery") { state.setLayout(.gallery) }
                 Divider()
+                Button(state.appearance.showHidden ? "Hide Hidden Files" : "Show Hidden Files") {
+                    state.toggleHiddenFiles()
+                }
+                .keyboardShortcut(".", modifiers: [.command, .shift])
                 Button(state.showPreviewPane ? "Hide Preview" : "Show Preview") {
                     state.togglePreviewPane()
                 }

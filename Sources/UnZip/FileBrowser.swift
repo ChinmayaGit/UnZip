@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Darwin
 import ImageIO
 import UniformTypeIdentifiers
@@ -217,6 +218,20 @@ enum FolderCover {
         }
         return NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
+
+    nonisolated static func videoThumbnail(at url: URL, maxPixel: Int = 256) -> CGImage? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
+        let times = [CMTime(seconds: 1, preferredTimescale: 600), .zero]
+        for time in times {
+            if let image = try? generator.copyCGImage(at: time, actualTime: nil) {
+                return image
+            }
+        }
+        return nil
+    }
 }
 
 @MainActor
@@ -261,8 +276,30 @@ final class FolderCoverStore: ObservableObject {
             }
             return
         }
+        if item.isVideo {
+            requestVideoThumbnail(item.url)
+            return
+        }
         guard item.isImage else { return }
         request(item.url, source: item.url, isDirectoryCover: false)
+    }
+
+    private func requestVideoThumbnail(_ url: URL) {
+        let key = url.standardizedFileURL.path
+        guard images[key] == nil, !requested.contains(key) else { return }
+        requested.insert(key)
+        let source = url
+        Task {
+            let generated = await Task.detached(priority: .utility) {
+                FolderCover.videoThumbnail(at: source)
+            }.value
+            guard let generated else {
+                requested.remove(key)
+                return
+            }
+            trimIfNeeded()
+            images[key] = NSImage(cgImage: generated, size: NSSize(width: generated.width, height: generated.height))
+        }
     }
 
     private func requestWorkspaceIcon(for url: URL) {

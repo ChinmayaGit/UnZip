@@ -199,11 +199,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    func playMedia(_ item: FileItem) {
-        playMedia(url: item.resolvedURL)
+    func playMedia(_ item: FileItem, revealPreview: Bool = false) {
+        playMedia(url: item.resolvedURL, revealPreview: revealPreview)
     }
 
-    func playMedia(url: URL) {
+    func playMedia(url: URL, revealPreview: Bool = false) {
         preview = nil
         let tracks: [URL]
         if MediaKind.isVideo(url) {
@@ -212,7 +212,7 @@ final class AppState: ObservableObject {
             tracks = fileBrowser.items.filter(\.isAudio).map(\.resolvedURL)
         }
         media.play(url, queue: tracks)
-        if MediaKind.isVideo(url) {
+        if MediaKind.isVideo(url), revealPreview {
             setShowPreviewPane(true)
         }
         status = "Playing \(url.lastPathComponent)"
@@ -373,6 +373,16 @@ final class AppState: ObservableObject {
         sortAscending.toggle()
         defaults.set(sortAscending, forKey: sortAscKey)
         ftpSortAscending = sortAscending
+    }
+
+    func setShowHidden(_ visible: Bool) {
+        appearance.showHidden = visible
+        fileBrowser.reload(showHidden: visible)
+        status = visible ? "Showing hidden files and folders" : "Hidden files and folders are hidden"
+    }
+
+    func toggleHiddenFiles() {
+        setShowHidden(!appearance.showHidden)
     }
 
     var selectedDocument: OpenDocument? {
@@ -605,7 +615,16 @@ final class AppState: ObservableObject {
             openImageGallery(item)
             return
         }
-        if MediaKind.isAudio(url) || MediaKind.isVideo(url) {
+        if item.isVideo {
+            if showPreviewPane {
+                playMedia(item)
+            } else {
+                NSWorkspace.shared.open(url)
+                status = "Opened \(url.lastPathComponent)"
+            }
+            return
+        }
+        if item.isAudio {
             playMedia(item)
             return
         }
@@ -699,6 +718,59 @@ final class AppState: ObservableObject {
 
     @Published var fileClipboard: [URL] = []
     @Published var fileClipboardCuts = false
+    private var fileKeyMonitor: Any?
+
+    func installFileKeyMonitor() {
+        guard fileKeyMonitor == nil else { return }
+        fileKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.handleFileKey(event)
+        }
+    }
+
+    func removeFileKeyMonitor() {
+        if let fileKeyMonitor {
+            NSEvent.removeMonitor(fileKeyMonitor)
+            self.fileKeyMonitor = nil
+        }
+    }
+
+    private func handleFileKey(_ event: NSEvent) -> NSEvent? {
+        guard isShowingFiles, !isEditingText else { return event }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = event.charactersIgnoringModifiers ?? ""
+        if flags == .command {
+            switch key {
+            case "c":
+                copySelectedFiles()
+                return nil
+            case "x":
+                cutSelectedFiles()
+                return nil
+            case "v":
+                pasteFiles()
+                return nil
+            default:
+                break
+            }
+        }
+        if flags == [.command, .option], key == "v" {
+            movePasteFiles()
+            return nil
+        }
+        return event
+    }
+
+    private var isEditingText: Bool {
+        var responder = NSApp.keyWindow?.firstResponder
+        while let current = responder {
+            if current is NSTextView || current is NSTextField {
+                return true
+            }
+            responder = current.nextResponder
+        }
+        return false
+    }
 
     func selectedFileItems() -> [FileItem] {
         let selected = fileBrowser.selectedItems
@@ -739,14 +811,16 @@ final class AppState: ObservableObject {
         status = urls.count == 1 ? "Cut \(urls[0].lastPathComponent)" : "Cut \(urls.count) items"
     }
 
+    func clipboardURLs() -> [URL] {
+        if !fileClipboard.isEmpty { return fileClipboard }
+        return pasteboardURLs()
+    }
+
+    var canPasteFiles: Bool { !clipboardURLs().isEmpty }
+
     func pasteFiles(into folder: URL? = nil) {
         let dest = folder ?? fileBrowser.currentURL
-        let urls: [URL]
-        if !fileClipboard.isEmpty {
-            urls = fileClipboard
-        } else {
-            urls = pasteboardURLs()
-        }
+        let urls = clipboardURLs()
         guard !urls.isEmpty else { return }
         if fileClipboardCuts {
             moveURLs(urls, into: dest)
@@ -755,6 +829,15 @@ final class AppState: ObservableObject {
         } else {
             copyURLs(urls, into: dest)
         }
+    }
+
+    func movePasteFiles(into folder: URL? = nil) {
+        let dest = folder ?? fileBrowser.currentURL
+        let urls = clipboardURLs()
+        guard !urls.isEmpty else { return }
+        moveURLs(urls, into: dest)
+        fileClipboard = []
+        fileClipboardCuts = false
     }
 
     func duplicateFileItems(_ items: [FileItem]) {
@@ -878,12 +961,24 @@ final class AppState: ObservableObject {
     private func writePasteboard(_ urls: [URL]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects(urls as [NSURL])
+        let items = urls.map { url -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            return item
+        }
+        pasteboard.writeObjects(items)
         pasteboard.setPropertyList(urls.map(\.path), forType: .init("NSFilenamesPboardType"))
     }
 
     private func pasteboardURLs() -> [URL] {
-        NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let board = NSPasteboard.general
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            return urls.map(\.standardizedFileURL)
+        }
+        if let paths = board.propertyList(forType: .init("NSFilenamesPboardType")) as? [String], !paths.isEmpty {
+            return paths.map { URL(fileURLWithPath: $0).standardizedFileURL }
+        }
+        return []
     }
 
     private func isPreviewable(_ url: URL) -> Bool {

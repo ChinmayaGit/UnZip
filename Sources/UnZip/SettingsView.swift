@@ -171,12 +171,9 @@ struct SettingsView: View {
                     get: { appearance.foldersFirst },
                     set: { appearance.foldersFirst = $0 }
                 ))
-                Toggle("Show hidden files", isOn: Binding(
+                Toggle("Show hidden files and folders", isOn: Binding(
                     get: { appearance.showHidden },
-                    set: {
-                        appearance.showHidden = $0
-                        state.fileBrowser.reload(showHidden: $0)
-                    }
+                    set: { state.setShowHidden($0) }
                 ))
                 Toggle("Show file extensions", isOn: Binding(
                     get: { appearance.showExtensions },

@@ -310,6 +310,9 @@ struct SidebarView: View {
                 } else if value.hasPrefix("fav-"),
                           let favorite = FileLocation.favorites.first(where: { "fav-\($0.id)" == value }) {
                     state.showFiles(at: favorite.url)
+                } else if value.hasPrefix("store-"),
+                          let usage = state.volumes.storage.first(where: { "store-\($0.id)" == value }) {
+                    state.showFiles(at: usage.url)
                 } else if value.hasPrefix("vol-"),
                           let volume = state.volumes.volumes.first(where: { "vol-\($0.id)" == value }) {
                     state.showFiles(at: volume.url)
@@ -340,6 +343,17 @@ struct SidebarView: View {
                     ForEach(FileLocation.favorites) { location in
                         Label(location.title, systemImage: location.systemImage)
                             .tag("fav-\(location.id)")
+                    }
+                }
+            }
+
+            if !state.volumes.storage.isEmpty {
+                Section("Storage") {
+                    ForEach(state.volumes.storage) { usage in
+                        StorageMeter(usage: usage, compact: true) {
+                            state.showFiles(at: usage.url)
+                        }
+                        .tag("store-\(usage.id)")
                     }
                 }
             }
@@ -992,18 +1006,30 @@ struct PreviewPane: View {
                     }
                 }
             } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "eye")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text("Select a file to preview")
-                        .foregroundStyle(.secondary)
-                    Button("Hide Preview") {
-                        state.setShowPreviewPane(false)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Storage")
+                            .font(.headline)
+                        if state.volumes.storage.isEmpty {
+                            Text("Select a file to preview")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(state.volumes.storage) { usage in
+                                StorageMeter(usage: usage) {
+                                    state.showFiles(at: usage.url)
+                                }
+                            }
+                        }
+                        Button("Hide Preview") {
+                            state.setShowPreviewPane(false)
+                        }
+                        .controlSize(.small)
+                        .padding(.top, 4)
                     }
-                    .controlSize(.small)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear { state.volumes.refresh() }
             }
         }
         .background(Color(nsColor: .textBackgroundColor))

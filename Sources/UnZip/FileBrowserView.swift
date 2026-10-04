@@ -36,6 +36,9 @@ struct FileBrowserView: View {
         VStack(spacing: 0) {
             pathBar
             viewTabs
+            if isHomeFolder, !state.volumes.storage.isEmpty {
+                homeStorage
+            }
             Group {
                 if let error = browser.errorMessage, items.isEmpty {
                     emptyState(icon: "lock.folder", title: "Can’t open this folder", detail: error)
@@ -68,6 +71,8 @@ struct FileBrowserView: View {
                 state.trashSelectedFiles()
                 return .handled
             }
+            .onAppear { state.installFileKeyMonitor() }
+            .onDisappear { state.removeFileKeyMonitor() }
             if shouldShowMediaBar {
                 MediaBar(
                     playback: state.media,
@@ -84,6 +89,27 @@ struct FileBrowserView: View {
             pathDraft = url.path
             editingPath = false
         }
+    }
+
+    private var isHomeFolder: Bool {
+        browser.currentURL.standardizedFileURL.path == FileLocation.home.url.standardizedFileURL.path
+    }
+
+    private var homeStorage: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(state.volumes.storage) { usage in
+                    StorageMeter(usage: usage) {
+                        state.showFiles(at: usage.url)
+                    }
+                    .frame(minWidth: 220, maxWidth: 280)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear { state.volumes.refresh() }
     }
 
     private var folderTracks: [URL] {
@@ -490,6 +516,13 @@ struct FileBrowserView: View {
             }
             .buttonStyle(.borderless)
             .help(state.sortAscending ? "Ascending" : "Descending")
+            Button {
+                state.toggleHiddenFiles()
+            } label: {
+                Image(systemName: appearance.showHidden ? "eye" : "eye.slash")
+            }
+            .buttonStyle(.borderless)
+            .help(appearance.showHidden ? "Hide hidden files and folders" : "Show hidden files and folders")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -624,7 +657,9 @@ struct FileBrowserView: View {
         if ids.isEmpty {
             Button("New Folder") { browser.createFolder() }
             Button("Paste") { state.pasteFiles() }
-                .disabled(state.fileClipboard.isEmpty && NSPasteboard.general.canReadObject(forClasses: [NSURL.self], options: nil) == false)
+                .disabled(!state.canPasteFiles)
+            Button("Move Item Here") { state.movePasteFiles() }
+                .disabled(!state.canPasteFiles)
             Button("Folder Image…") {
                 state.folderImageTarget = FolderImageTarget(url: browser.currentURL, name: browser.currentURL.lastPathComponent)
             }
@@ -643,6 +678,9 @@ struct FileBrowserView: View {
             Button("Copy") { state.copyFileItems(selected) }
             Button("Cut") { state.cutFileItems(selected) }
             Button("Paste") { state.pasteFiles() }
+                .disabled(!state.canPasteFiles)
+            Button("Move Item Here") { state.movePasteFiles() }
+                .disabled(!state.canPasteFiles)
             Button("Duplicate") { state.duplicateFileItems(selected) }
             Button("Move To…") { state.moveFileItems(selected) }
             Menu("Compress Selected") {
@@ -688,7 +726,9 @@ struct FileBrowserView: View {
         } else if item.isImage {
             Button("View Image") { state.openImageGallery(item) }
         } else if item.isAudio || item.isVideo {
-            Button(item.isVideo ? "Play Video" : "Play") { state.playMedia(item) }
+            Button(item.isVideo ? "Play Video" : "Play") {
+                state.playMedia(item, revealPreview: item.isVideo)
+            }
         } else if item.isArchive {
             Button("Open Archive") { state.openFileItem(item) }
         } else {
@@ -703,6 +743,9 @@ struct FileBrowserView: View {
         Button("Copy") { state.copyFileItems([item]) }
         Button("Cut") { state.cutFileItems([item]) }
         Button("Paste") { state.pasteFiles(into: item.canEnter ? item.url : browser.currentURL) }
+            .disabled(!state.canPasteFiles)
+        Button("Move Item Here") { state.movePasteFiles(into: item.canEnter ? item.url : browser.currentURL) }
+            .disabled(!state.canPasteFiles)
         Button("Duplicate") { state.duplicateFileItems([item]) }
         Button("Move To…") { state.moveFileItems([item]) }
         Divider()
@@ -757,6 +800,12 @@ struct FileGlyph: View {
                 .fill(selected ? Color.clear : Color(nsColor: .controlBackgroundColor))
             if shouldShowImage, let image = covers.image(for: item.url) {
                 fitted(image)
+                if item.isVideo {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: max(12, size * 0.28)))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .shadow(radius: 2)
+                }
             } else {
                 Image(systemName: glyphName)
                     .font(.system(size: max(12, size * 0.38), weight: .medium))
@@ -775,7 +824,7 @@ struct FileGlyph: View {
         if item.canEnter {
             return style.mode == .auto || style.mode == .custom
         }
-        return item.isImage
+        return item.isImage || item.isVideo
     }
 
     private var glyphName: String {

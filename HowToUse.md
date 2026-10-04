@@ -21,6 +21,7 @@ If macOS blocks the first launch, Control-click UnZip → **Open**. That is Gate
 3. Double-click a folder to enter it. Double-click a file to preview, play, or open it.
 4. Switch views on the tab bar: **Details**, **Grid**, **Large** (and more if you turn them on in Settings).
 5. Use **Filter** and **Sort** on the same bar. Search the current folder from the search field.
+6. Click the eye on that bar, or press **Shift-Command-Period**, to show hidden files and folders (names that start with `.`). Same toggle is in **Settings → Explorer**.
 
 Toolbar back / forward / up work like a browser.
 
@@ -33,6 +34,7 @@ Toolbar back / forward / up work like a browser.
 | Section | What it does |
 | --- | --- |
 | Files | Current folder plus Favorites (Home, Desktop, Downloads…) |
+| Storage | Disks and partitions with used space, free space, and a percentage bar. Home and the preview pane show the same |
 | Devices | USB sticks, external disks, and network volumes. Right-click **Eject** |
 | Archives | Open archives. **X** on a row closes that archive |
 | Servers | FTP / FTPS / SFTP. **X** disconnects or removes a saved server |
@@ -74,6 +76,7 @@ Double-click the path area to type a path (including `~`).
 | Copy | Command-C or right-click **Copy** |
 | Cut | Command-X |
 | Paste | Command-V |
+| Move Item Here | Command-Option-V |
 | Duplicate | Command-D |
 | Rename | Command-Return or right-click **Rename** |
 | Move To… | Right-click or Edit menu |
@@ -147,10 +150,10 @@ Formats include MP3, AAC, M4A, FLAC, WAV, AIFF, Opus, OGG, and others.
 
 ## Video
 
-**What it is for:** Watch files in the preview pane.
+**What it is for:** Watch files in the preview pane, or in your default player.
 
-1. Double-click a video, or right-click **Play Video**.
-2. Use play / pause, seek, volume, and **Full Screen**.
+1. Double-click a video. If the preview pane is open, it plays there. If it is closed, the video opens in your default player (VLC, QuickTime, and so on).
+2. Right-click **Play Video** to play in UnZip and open the preview pane. Videos show a thumbnail in the folder list.
 3. Videos are not treated as music (no shuffle / album extras on the video pane).
 4. Right-click **Open With** to play in **VLC**, **QuickTime Player**, or another app. Use **Set as Default** if you always want that app.
 
@@ -255,7 +258,7 @@ Open **Settings…** (gear) or press **Command-comma**. Settings are grouped on 
 | --- | --- |
 | Appearance | System, Light, Dark, Midnight, Warm, Graphite |
 | Folder Images | Default cover (first image / icon / custom), fit, default folder symbol |
-| Explorer | Which views are on the tab bar, icon scale, sort, hidden files, extensions, kind filter |
+| Explorer | Which views are on the tab bar, icon scale, sort, hidden files and folders, extensions, kind filter |
 | Sidebar | Show or hide Favorites, Devices, Archives, Servers, Recent |
 | Playback | Music bar height (64–140 pt) |
 
@@ -275,11 +278,13 @@ Shuffle, auto-next, and loop live on the music player, not only in Settings.
 | Command-E | Extract selected |
 | Shift-Command-S | Share |
 | Command-C / X / V | Copy / Cut / Paste |
+| Command-Option-V | Move copied items here |
 | Command-D | Duplicate |
 | Command-A | Select all |
 | Command-I | Details |
 | Command-Return | Rename |
 | Command-R | Refresh |
+| Shift-Command-Period | Show or hide hidden files and folders |
 | Delete | Move to Trash |
 | Command-1 / 2 / 3 | Grid / Details / Large |
 | Option-Command-P | Show or hide preview |
